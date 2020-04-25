@@ -5,7 +5,7 @@
 #include <linux/slab.h>
 #include <linux/usb.h>
 
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
 
 #define USB_VENDOR_ID_CORSAIR    0x1b1c
 #define USB_VENDOR_ID_CORSAIR_CP 0x0c10
