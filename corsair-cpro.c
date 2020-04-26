@@ -70,46 +70,6 @@ static void dump_data(u8* data, int length)
         return;
 }
 
-static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
-                          u32 attr, int channel)
-{
-        switch (type) {
-        case hwmon_chip:
-                switch (attr) {
-                case hwmon_chip_update_interval:
-                        return 0644;
-                }
-                break;
-        case hwmon_temp:
-                switch (attr) {
-                case hwmon_temp_input:
-                        return 0444;
-                }
-                break;
-        case hwmon_fan:
-                switch (attr) {
-                case hwmon_fan_input:
-                        return 0444;
-		case hwmon_fan_label:
-			return 0444;
-		case hwmon_fan_enable:
-			return 0644;
-		}
-                break;
-        case hwmon_pwm:
-                switch (attr) {
-                case hwmon_pwm_input:
-                        return 0644;
-		case hwmon_pwm_enable:
-			return 0644;
-                }
-                break;
-        default:
-                break;
-        }
-        return 0;
-};
-
 static int set_pwm(struct ccp_device *ccp, int channel, long val)
 {
         int ret;
@@ -266,6 +226,46 @@ exit:
         kfree(buffer);
         return ret <= 0 ? ret : -EIO;
 }
+
+static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
+                          u32 attr, int channel)
+{
+        switch (type) {
+        case hwmon_chip:
+                switch (attr) {
+                case hwmon_chip_update_interval:
+                        return 0644;
+                }
+                break;
+        case hwmon_temp:
+                switch (attr) {
+                case hwmon_temp_input:
+                        return 0444;
+                }
+                break;
+        case hwmon_fan:
+                switch (attr) {
+                case hwmon_fan_input:
+                        return 0444;
+		case hwmon_fan_label:
+			return 0444;
+		case hwmon_fan_enable:
+			return 0644;
+		}
+                break;
+        case hwmon_pwm:
+                switch (attr) {
+                case hwmon_pwm_input:
+                        return 0644;
+		case hwmon_pwm_enable:
+			return 0644;
+                }
+                break;
+        default:
+                break;
+        }
+        return 0;
+};
 
 static int ccp_read_string(struct device *dev,
 			   enum hwmon_sensor_types type,
