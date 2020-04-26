@@ -21,6 +21,7 @@ MODULE_LICENSE("GPL v2");
 #define CTL_SET_FAN_FPWM 0x23  // byte 1 is fan number
                                // byte 2 is percentage from 0 - 100
 
+
 struct ccp_device {
         struct usb_device *udev;
         struct device *hwmondev;
@@ -116,7 +117,7 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
 
 exit:
         kfree(buffer);
-        return ret <= 0 ? ret : -EIO;        
+        return ret <= 0 ? ret : -EIO;
 
 }
 
@@ -127,7 +128,7 @@ static int get_fan_mode(struct ccp_device *ccp, int channel, const char** mode_d
 	int mode;
         u8 *buffer;
         ret = 0;
-        
+
         buffer = kzalloc(MAX_BUFFER_SIZE, GFP_KERNEL);
         if (buffer == 0) {
 		dev_err(ccp->hwmondev, "Out of memory\n");
@@ -186,7 +187,7 @@ static int get_temp_or_rpm(struct ccp_device *ccp, int ctlrequest, int channel, 
         int actual_length;
         u8 *buffer;
         ret = 0;
-        
+
         buffer = kzalloc(MAX_BUFFER_SIZE, GFP_KERNEL);
         if (buffer == 0) {
 		dev_err(ccp->hwmondev, "Out of memory\n");
@@ -309,7 +310,7 @@ static int ccp_read(struct device* dev, enum hwmon_sensor_types type,
         int err = 0;
         struct ccp_device *ccp;
 //	char fanLabel[5];
-        
+
         ccp = dev_get_drvdata(dev);
         switch(type) {
         case hwmon_temp:
@@ -364,7 +365,7 @@ static int ccp_write(struct device* dev, enum hwmon_sensor_types type,
 {
         int err = 0;
         struct ccp_device *ccp;
-        
+
         ccp = dev_get_drvdata(dev);
 
         switch(type) {
@@ -441,7 +442,7 @@ static int ccp_probe(struct usb_interface *intf, const struct usb_device_id *id)
 				ccp,
 				&ccp_chip_info,
 				0);
-        
+
         return 0;
 
 /*error:
