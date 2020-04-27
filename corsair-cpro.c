@@ -1,6 +1,7 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/hwmon.h>
+#include <linux/spinlock.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
@@ -71,11 +72,47 @@ static void dump_data(u8* data, int length)
         return;
 }
 
+static int get_usb_data(struct ccp_device *ccp, u8* buffer)
+{
+        int ret;
+        int actual_length;
+
+        spin_lock(&(ccp->lock));
+
+        ret = usb_bulk_msg(ccp->udev,
+                        usb_sndintpipe(ccp->udev, 2),
+                        buffer,
+                        OUT_BUFFER_SIZE,
+                        &actual_length,
+                        1000);
+
+        if(ret) {
+                printk(KERN_ALERT "send usb %d ", ret);
+                goto exit;
+        }
+
+        ret = usb_bulk_msg(ccp->udev,
+                        usb_rcvintpipe(ccp->udev, 1),
+                        buffer,
+                        IN_BUFFER_SIZE,
+                        &actual_length,
+                        1000);
+
+        if(ret) {
+                printk(KERN_ALERT "rcv usb %d ", ret);
+                goto exit;
+        }
+exit:
+        spin_unlock(&(ccp->lock));
+        return 0;
+}
+
 static int set_pwm(struct ccp_device *ccp, int channel, long val)
 {
         int ret;
         int actual_length;
         u8 *buffer;
+
         ret = 0;
 
         if(val > 255) {
@@ -112,7 +149,6 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
                 printk(KERN_ALERT "send usb %d ", ret);
                 goto exit;
         }
-
         return 0;
 
 exit:
@@ -137,29 +173,7 @@ static int get_fan_mode(struct ccp_device *ccp, int channel, const char** mode_d
 
         buffer[0] = 0x20;
 
-        ret = usb_bulk_msg(ccp->udev,
-                        usb_sndintpipe(ccp->udev, 2),
-                        buffer,
-                        OUT_BUFFER_SIZE,
-                        &actual_length,
-                        1000);
-
-        if(ret) {
-                printk(KERN_ALERT "send usb %d ", ret);
-                goto exit;
-        }
-
-        ret = usb_bulk_msg(ccp->udev,
-                        usb_rcvintpipe(ccp->udev, 1),
-                        buffer,
-                        IN_BUFFER_SIZE,
-                        &actual_length,
-                        1000);
-
-        if(ret) {
-                printk(KERN_ALERT "rcv usb %d ", ret);
-                goto exit;
-        }
+        ret = get_usb_data(ccp, buffer);
 	mode = buffer[channel+1];
 	switch(mode) {
 	case 0:
@@ -197,29 +211,7 @@ static int get_temp_or_rpm(struct ccp_device *ccp, int ctlrequest, int channel, 
         buffer[0] = ctlrequest;
         buffer[1] = channel;
 
-        ret = usb_bulk_msg(ccp->udev,
-                        usb_sndintpipe(ccp->udev, 2),
-                        buffer,
-                        OUT_BUFFER_SIZE,
-                        &actual_length,
-                        1000);
-
-        if(ret) {
-                printk(KERN_ALERT "send usb %d ", ret);
-                goto exit;
-        }
-
-        ret = usb_bulk_msg(ccp->udev,
-                        usb_rcvintpipe(ccp->udev, 1),
-                        buffer,
-                        IN_BUFFER_SIZE,
-                        &actual_length,
-                        1000);
-
-        if(ret) {
-                printk(KERN_ALERT "rcv usb %d ", ret);
-                goto exit;
-        }
+        get_usb_data(ccp, buffer);
 
 
         *val = (buffer[1] << 8) + buffer[2];
@@ -425,6 +417,8 @@ static int ccp_probe(struct usb_interface *intf, const struct usb_device_id *id)
 		dev_err(&intf->dev, "Out of memory\n");
 		goto error_mem;
 	}
+
+        spin_lock_init(&(ccp->lock));
 
 	ccp->fan_enable[0] = 1;
 	ccp->fan_enable[1] = 1;
