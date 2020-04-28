@@ -12,11 +12,11 @@ license=('GPL2')
 depends=('make' 'gcc' 'linux' 'dkms')
 makedepends=('git' 'linux-headers')
 install=${pkgname}.install
-source=('~/builds/corsair-cpro/corsair-cpro.c'
-        '~/builds/corsair-cpro/Makefile'
-        '~/builds/corsair-cpro/10-corsair-cpro.rules'
-        '~/builds/corsair-cpro/corsair-cpro.conf'
-        '~/builds/corsair-cpro/dkms.conf')
+source=('./corsair-cpro.c'
+        './Makefile'
+        './10-corsair-cpro.rules'
+        './corsair-cpro.conf'
+        './dkms.conf')
 md5sums=('SKIP'
          'SKIP'
          'SKIP'
