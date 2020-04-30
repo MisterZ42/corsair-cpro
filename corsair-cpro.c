@@ -31,6 +31,7 @@ struct ccp_device {
         int pwm[6];
 	int fan_mode[6];
 	int fan_enable[6];
+        int pwm_enable[6];
 
 };
 
@@ -289,7 +290,6 @@ static int ccp_read_string(struct device *dev,
 			return -EINVAL;
 		}
 	case hwmon_temp:
-//		sprintf(str, "Temp%d", channel);
 		return 0;
 	default:
 		return -EINVAL;
@@ -301,7 +301,6 @@ static int ccp_read(struct device* dev, enum hwmon_sensor_types type,
 {
         int err = 0;
         struct ccp_device *ccp;
-//	char fanLabel[5];
 
         ccp = dev_get_drvdata(dev);
         switch(type) {
@@ -340,12 +339,15 @@ static int ccp_read(struct device* dev, enum hwmon_sensor_types type,
 			break;
 		case hwmon_pwm_enable:
 			// automatic configuration not yet supported
-			// need more info about device
-			*val = 1;
+			// need more info about device, for now returns
+                        // previous pwm value.
+                        *val = ccp->pwm_enable[channel];
 			break;
 		default:
 			err = -EINVAL;
+                        break;
 		}
+                break;
         default:
                 err = -EINVAL;
         }
@@ -375,6 +377,9 @@ static int ccp_write(struct device* dev, enum hwmon_sensor_types type,
                 switch(attr) {
                 case hwmon_pwm_input:
                         set_pwm(ccp, channel, val);
+                        break;
+                case hwmon_pwm_enable:
+                        ccp->pwm_enable[channel] = val;
                         break;
                 default:
                         err = -EINVAL;
