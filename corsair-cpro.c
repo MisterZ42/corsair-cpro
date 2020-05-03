@@ -53,12 +53,12 @@ static const struct hwmon_channel_info *ccp_info[] = {
                         HWMON_F_INPUT | HWMON_F_LABEL | HWMON_F_ENABLE
                         ),
         HWMON_CHANNEL_INFO(pwm,
-                        HWMON_PWM_INPUT | HWMON_PWM_ENABLE,
-                        HWMON_PWM_INPUT | HWMON_PWM_ENABLE,
-                        HWMON_PWM_INPUT | HWMON_PWM_ENABLE,
-                        HWMON_PWM_INPUT | HWMON_PWM_ENABLE,
-                        HWMON_PWM_INPUT | HWMON_PWM_ENABLE,
-                        HWMON_PWM_INPUT | HWMON_PWM_ENABLE
+                        HWMON_PWM_INPUT, //| HWMON_PWM_ENABLE,
+                        HWMON_PWM_INPUT, //| HWMON_PWM_ENABLE,
+                        HWMON_PWM_INPUT, //| HWMON_PWM_ENABLE,
+                        HWMON_PWM_INPUT, //| HWMON_PWM_ENABLE,
+                        HWMON_PWM_INPUT, //| HWMON_PWM_ENABLE,
+                        HWMON_PWM_INPUT //| HWMON_PWM_ENABLE
                         ),
         NULL
 };
@@ -78,7 +78,7 @@ static int get_usb_data(struct ccp_device *ccp, u8* buffer)
         int ret;
         int actual_length;
 
-        spin_lock(&(ccp->lock));
+//        spin_lock(&(ccp->lock));
 
         ret = usb_bulk_msg(ccp->udev,
                         usb_sndintpipe(ccp->udev, 2),
@@ -104,7 +104,7 @@ static int get_usb_data(struct ccp_device *ccp, u8* buffer)
                 goto exit;
         }
 exit:
-        spin_unlock(&(ccp->lock));
+//        spin_unlock(&(ccp->lock));
         return 0;
 }
 
@@ -119,6 +119,8 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
         if(val > 255) {
                 return -EINVAL;
         }
+
+        ccp->pwm[channel] = val;
         // The Corsair Commander Pro uses values from 0-100
         // so I need to convert it.
 
@@ -127,7 +129,6 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
         val = val * 100;
         val = val >> 8;
 //        printk(KERN_ALERT "val2 = %d\n", val);
-	ccp->pwm[channel] = val;
 
         buffer = kzalloc(OUT_BUFFER_SIZE, GFP_KERNEL);
         if (buffer == 0) {
@@ -139,12 +140,15 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
         buffer[1] = channel;
         buffer[2] = val;
 
+/*
         ret = usb_bulk_msg(ccp->udev,
                         usb_sndintpipe(ccp->udev, 2),
                         buffer,
                         OUT_BUFFER_SIZE,
                         &actual_length,
-                        1000);
+                        1000);*/
+
+        ret = get_usb_data(ccp, buffer);
 
         if(ret) {
                 printk(KERN_ALERT "send usb %d ", ret);
