@@ -14,11 +14,9 @@ makedepends=('git' 'linux-headers')
 install=${pkgname}.install
 source=('./corsair-cpro.c'
         './Makefile'
-        './10-corsair-cpro.rules'
         './corsair-cpro.conf'
         './dkms.conf')
 md5sums=('SKIP'
-         'SKIP'
          'SKIP'
          'SKIP'
          'SKIP')
@@ -39,8 +37,6 @@ package() {
 
   # Create Udev-Rule and Module Start
   mkdir -p "${pkgdir}/etc/modules-load.d"
-  mkdir -p "${pkgdir}/etc/udev/rules.d"
-  cp -rL ${srcdir}/10-corsair-cpro.rules "${pkgdir}/etc/udev/rules.d/"
   cp -rL ${srcdir}/corsair-cpro.conf "${pkgdir}/etc/modules-load.d/"
 
 }

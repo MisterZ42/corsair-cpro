@@ -1,5 +1,6 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/hid.h>
 #include <linux/hwmon.h>
 #include <linux/spinlock.h>
 #include <linux/module.h>
@@ -7,6 +8,10 @@
 #include <linux/usb.h>
 
 MODULE_LICENSE("GPL v2");
+
+// should be in usbhid.h
+#define	hid_to_usb_dev(hid_dev) \
+	to_usb_device(hid_dev->dev.parent->parent)
 
 #define USB_VENDOR_ID_CORSAIR    0x1b1c
 #define USB_VENDOR_ID_CORSAIR_CP 0x0c10
@@ -24,6 +29,7 @@ MODULE_LICENSE("GPL v2");
 
 
 struct ccp_device {
+        struct hid_device *hdev;
         struct usb_device *udev;
         struct device *hwmondev;
         spinlock_t lock;
@@ -53,12 +59,12 @@ static const struct hwmon_channel_info *ccp_info[] = {
                         HWMON_F_INPUT | HWMON_F_LABEL | HWMON_F_ENABLE
                         ),
         HWMON_CHANNEL_INFO(pwm,
-                        HWMON_PWM_INPUT, //| HWMON_PWM_ENABLE,
-                        HWMON_PWM_INPUT, //| HWMON_PWM_ENABLE,
-                        HWMON_PWM_INPUT, //| HWMON_PWM_ENABLE,
-                        HWMON_PWM_INPUT, //| HWMON_PWM_ENABLE,
-                        HWMON_PWM_INPUT, //| HWMON_PWM_ENABLE,
-                        HWMON_PWM_INPUT //| HWMON_PWM_ENABLE
+                        HWMON_PWM_INPUT,
+                        HWMON_PWM_INPUT,
+                        HWMON_PWM_INPUT,
+                        HWMON_PWM_INPUT,
+                        HWMON_PWM_INPUT,
+                        HWMON_PWM_INPUT
                         ),
         NULL
 };
@@ -111,7 +117,6 @@ exit:
 static int set_pwm(struct ccp_device *ccp, int channel, long val)
 {
         int ret;
-        int actual_length;
         u8 *buffer;
 
         ret = 0;
@@ -128,7 +133,6 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
         val = val / 255;
         val = val * 100;
         val = val >> 8;
-//        printk(KERN_ALERT "val2 = %d\n", val);
 
         buffer = kzalloc(OUT_BUFFER_SIZE, GFP_KERNEL);
         if (buffer == 0) {
@@ -139,14 +143,6 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
         buffer[0] = CTL_SET_FAN_FPWM;
         buffer[1] = channel;
         buffer[2] = val;
-
-/*
-        ret = usb_bulk_msg(ccp->udev,
-                        usb_sndintpipe(ccp->udev, 2),
-                        buffer,
-                        OUT_BUFFER_SIZE,
-                        &actual_length,
-                        1000);*/
 
         ret = get_usb_data(ccp, buffer);
 
@@ -165,7 +161,6 @@ exit:
 static int get_fan_mode(struct ccp_device *ccp, int channel, const char** mode_desc)
 {
         int ret;
-        int actual_length;
 	int mode;
         u8 *buffer;
         ret = 0;
@@ -195,17 +190,14 @@ static int get_fan_mode(struct ccp_device *ccp, int channel, const char** mode_d
 		break;
 	}
 
-exit:
         kfree(buffer);
         return ret <= 0 ? ret : -EIO;
 }
 
 static int get_temp_or_rpm(struct ccp_device *ccp, int ctlrequest, int channel, long *val)
 {
-        int ret;
-        int actual_length;
+        int ret = 0;
         u8 *buffer;
-        ret = 0;
 
         buffer = kzalloc(MAX_BUFFER_SIZE, GFP_KERNEL);
         if (buffer == 0) {
@@ -220,7 +212,7 @@ static int get_temp_or_rpm(struct ccp_device *ccp, int ctlrequest, int channel, 
 
 
         *val = (buffer[1] << 8) + buffer[2];
-exit:
+
         kfree(buffer);
         return ret <= 0 ? ret : -EIO;
 }
@@ -410,23 +402,32 @@ static const struct hwmon_chip_info ccp_chip_info = {
 
 };
 
-
-static int ccp_probe(struct usb_interface *intf, const struct usb_device_id *id)
+static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 {
         struct ccp_device *ccp;
-	struct usb_device *udev = interface_to_usbdev(intf);
-	struct device* hwmondev;
-	int retval = -ENOMEM;
+	struct usb_device *udev = hid_to_usb_dev(hdev);
+	int retval = 0;
 
         printk(KERN_ALERT "ccp_probe\n");
+
+	retval = hid_parse(hdev);
+	if (retval) {
+		hid_err(hdev, "hid_parse failed\n");
+		goto error;
+	}
+
+	retval = hid_hw_start(hdev, HID_CONNECT_DEFAULT);
+	if (retval) {
+		hid_err(hdev, "hid_hw_start failed\n");
+		goto error;
+	}
 
 	ccp = kzalloc(sizeof(struct ccp_device), GFP_KERNEL);
 
 	if (ccp == NULL) {
-		dev_err(&intf->dev, "Out of memory\n");
-		goto error_mem;
+		hid_err(hdev, "Out of memory\n");
+		goto error;
 	}
-
         spin_lock_init(&(ccp->lock));
 
 	ccp->fan_enable[0] = 1;
@@ -437,8 +438,7 @@ static int ccp_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	ccp->fan_enable[5] = 1;
 
 	ccp->udev = usb_get_dev(udev);
-
-	usb_set_intfdata (intf, ccp);
+        ccp->hdev = hdev;
 
         ccp->hwmondev = devm_hwmon_device_register_with_info(&(udev->dev), // udev->dev
 				"corsaircpro",
@@ -448,62 +448,23 @@ static int ccp_probe(struct usb_interface *intf, const struct usb_device_id *id)
 
         return 0;
 
-/*error:
-	usb_set_intfdata (intf, NULL);
-	usb_put_dev(ccp->udev);
-	kfree(ccp);*/
-error_mem:
+error:
 	return retval;
 
 }
 
-static void ccp_disconnect(struct usb_interface *intf)
-{
-        struct ccp_device *ccp;
-
-        ccp = usb_get_intfdata (intf);
-
-        hwmon_device_unregister(ccp->hwmondev);
-
-	usb_set_intfdata (intf, NULL);
-
-	usb_put_dev(ccp->udev);
-
-	kfree(ccp);
-
-        printk(KERN_ALERT "ccp_disconnect\n");
-}
-
-static const struct usb_device_id ccp_devices[] = {
-        { USB_DEVICE(USB_VENDOR_ID_CORSAIR, USB_VENDOR_ID_CORSAIR_CP) },
+static const struct hid_device_id ccp_devices[] = {
+        { HID_USB_DEVICE(USB_VENDOR_ID_CORSAIR, USB_VENDOR_ID_CORSAIR_CP) },
         { }
 };
 
+MODULE_DEVICE_TABLE(hid, ccp_devices);
 
-static struct usb_driver ccp_driver = {
+static struct hid_driver ccp_driver = {
         .name = "corsair-cpro",
         .id_table = ccp_devices,
         .probe = ccp_probe,
-        .disconnect = ccp_disconnect,
+//        .disconnect = ccp_disconnect,
 };
 
-static int __init ccp_init(void)
-{
-        int result;
-
-        printk(KERN_ALERT "ccp_init\n");
-
-        result = usb_register(&ccp_driver);
-        if (result)
-                printk(KERN_ALERT "usb_register failed, Error number %d", result);
-
-        return result;
-}
-
-static void __exit ccp_exit(void)
-{
-        usb_deregister(&ccp_driver);
-}
-
-module_init(ccp_init);
-module_exit(ccp_exit);
+module_hid_driver(ccp_driver);
