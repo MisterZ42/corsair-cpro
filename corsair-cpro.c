@@ -13,8 +13,8 @@ MODULE_LICENSE("GPL v2");
 #define	hid_to_usb_dev(hid_dev) \
 	to_usb_device(hid_dev->dev.parent->parent)
 
-#define USB_VENDOR_ID_CORSAIR    0x1b1c
-#define USB_VENDOR_ID_CORSAIR_CP 0x0c10
+#define USB_VENDOR_ID_CORSAIR              0x1b1c
+#define USB_VENDOR_ID_CORSAIR_COMMANDERPRO 0x0c10
 
 #define OUT_BUFFER_SIZE 63
 #define IN_BUFFER_SIZE 16
@@ -51,12 +51,12 @@ static const struct hwmon_channel_info *ccp_info[] = {
                         HWMON_T_INPUT | HWMON_T_MAX
                         ),
         HWMON_CHANNEL_INFO(fan,
-                        HWMON_F_INPUT | HWMON_F_LABEL | HWMON_F_ENABLE,
-                        HWMON_F_INPUT | HWMON_F_LABEL | HWMON_F_ENABLE,
-                        HWMON_F_INPUT | HWMON_F_LABEL | HWMON_F_ENABLE,
-                        HWMON_F_INPUT | HWMON_F_LABEL | HWMON_F_ENABLE,
-                        HWMON_F_INPUT | HWMON_F_LABEL | HWMON_F_ENABLE,
-                        HWMON_F_INPUT | HWMON_F_LABEL | HWMON_F_ENABLE
+                        HWMON_F_INPUT | HWMON_F_ENABLE,
+                        HWMON_F_INPUT | HWMON_F_ENABLE,
+                        HWMON_F_INPUT | HWMON_F_ENABLE,
+                        HWMON_F_INPUT | HWMON_F_ENABLE,
+                        HWMON_F_INPUT | HWMON_F_ENABLE,
+                        HWMON_F_INPUT | HWMON_F_ENABLE
                         ),
         HWMON_CHANNEL_INFO(pwm,
                         HWMON_PWM_INPUT,
@@ -257,41 +257,6 @@ static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
         return 0;
 };
 
-static int ccp_read_string(struct device *dev,
-			   enum hwmon_sensor_types type,
-			   u32 attr, int channel, const char **str)
-{
-	switch (type) {
-	case hwmon_fan:
-		switch (channel) {
-		case 0:
-			*str = "Fan1";
-			return 0;
-		case 1:
-			*str = "Fan2";
-			return 0;
-		case 2:
-			*str = "Fan3";
-			return 0;
-		case 3:
-			*str = "Fan4";
-			return 0;
-		case 4:
-			*str = "Fan5";
-			return 0;
-		case 5:
-			*str = "Fan6";
-			return 0;
-		default:
-			return -EINVAL;
-		}
-	case hwmon_temp:
-		return 0;
-	default:
-		return -EINVAL;
-	}
-}
-
 static int ccp_read(struct device* dev, enum hwmon_sensor_types type,
                     u32 attr, int channel, long *val)
 {
@@ -392,7 +357,6 @@ static int ccp_write(struct device* dev, enum hwmon_sensor_types type,
 static const struct hwmon_ops ccp_hwmon_ops = {
         .is_visible = ccp_is_visible,
         .read = ccp_read,
-	.read_string = ccp_read_string,
         .write = ccp_write,
 };
 
@@ -416,13 +380,7 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		goto error;
 	}
 
-	retval = hid_hw_start(hdev, HID_CONNECT_DEFAULT);
-	if (retval) {
-		hid_err(hdev, "hid_hw_start failed\n");
-		goto error;
-	}
-
-	ccp = kzalloc(sizeof(struct ccp_device), GFP_KERNEL);
+	ccp = devm_kzalloc(&hdev->dev, sizeof(struct ccp_device), GFP_KERNEL);
 
 	if (ccp == NULL) {
 		hid_err(hdev, "Out of memory\n");
@@ -437,14 +395,18 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	ccp->fan_enable[4] = 1;
 	ccp->fan_enable[5] = 1;
 
+	hid_set_drvdata(hdev, ccp);
+
 	ccp->udev = usb_get_dev(udev);
         ccp->hdev = hdev;
 
-        ccp->hwmondev = devm_hwmon_device_register_with_info(&(udev->dev), // udev->dev
+        ccp->hwmondev = devm_hwmon_device_register_with_info(&hdev->dev, // udev->dev
 				"corsaircpro",
 				ccp,
 				&ccp_chip_info,
 				0);
+
+	printk(KERN_ALERT "HWMon Register\n");
 
         return 0;
 
@@ -453,8 +415,13 @@ error:
 
 }
 
+void ccp_remove(struct hid_device* hdev)
+{
+
+}
+
 static const struct hid_device_id ccp_devices[] = {
-        { HID_USB_DEVICE(USB_VENDOR_ID_CORSAIR, USB_VENDOR_ID_CORSAIR_CP) },
+        { HID_USB_DEVICE(USB_VENDOR_ID_CORSAIR, USB_VENDOR_ID_CORSAIR_COMMANDERPRO) },
         { }
 };
 
@@ -464,7 +431,7 @@ static struct hid_driver ccp_driver = {
         .name = "corsair-cpro",
         .id_table = ccp_devices,
         .probe = ccp_probe,
-//        .disconnect = ccp_disconnect,
+        .remove = ccp_remove,
 };
 
 module_hid_driver(ccp_driver);
