@@ -9,7 +9,7 @@
 
 MODULE_LICENSE("GPL v2");
 
-// from usbhid.h
+/* from usbhid.h */
 #define	hid_to_usb_dev(hid_dev) \
 	to_usb_device(hid_dev->dev.parent->parent)
 
@@ -20,19 +20,18 @@ MODULE_LICENSE("GPL v2");
 #define IN_BUFFER_SIZE 16
 #define MAX_BUFFER_SIZE 63
 
-#define CTL_GET_TMP_CFG  0x10  // bytes 1-4 show connection of corresponding sensor
-#define CTL_GET_TMP      0x11  // byte 1 should be tmp-sensor, rest zero
-                               // returns temp for channel in bytes 1 and 2
-#define CTL_GET_FAN_RPM  0x21  // works exactly like CTL_GET_TMP
-#define CTL_SET_FAN_FPWM 0x23  // byte 1 is fan number
-                               // byte 2 is percentage from 0 - 100
+#define CTL_GET_TMP_CFG  0x10  /* bytes 1-4 show connection of corresponding sensor */
+#define CTL_GET_TMP      0x11  /* byte 1 should be tmp-sensor, rest zero */
+                               /* returns temp for channel in bytes 1 and 2 */
+#define CTL_GET_FAN_RPM  0x21  /* works exactly like CTL_GET_TMP */
+#define CTL_SET_FAN_FPWM 0x23  /* byte 1 is fan number */
+                               /* byte 2 is percentage from 0 - 100 */
 
 
 struct ccp_device {
         struct hid_device *hdev;
         struct usb_device *udev;
         struct device *hwmondev;
-        spinlock_t lock;
         int temp[4];
         int pwm[6];
 	int fan_mode[6];
@@ -84,8 +83,6 @@ static int get_usb_data(struct ccp_device *ccp, u8* buffer)
         int ret;
         int actual_length;
 
-        spin_lock(&(ccp->lock));
-
         ret = usb_bulk_msg(ccp->udev,
                         usb_sndintpipe(ccp->udev, 2),
                         buffer,
@@ -110,7 +107,6 @@ static int get_usb_data(struct ccp_device *ccp, u8* buffer)
                 goto exit;
         }
 exit:
-        spin_unlock(&(ccp->lock));
         return 0;
 }
 
@@ -126,8 +122,8 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
         }
 
         ccp->pwm[channel] = val;
-        // The Corsair Commander Pro uses values from 0-100
-        // so I need to convert it.
+        /* The Corsair Commander Pro uses values from 0-100
+           so I need to convert it. */
 
         val = val << 8;
         val = val / 255;
@@ -299,7 +295,7 @@ static int ccp_read(struct device* dev, enum hwmon_sensor_types type,
 			*val = ccp->pwm[channel];
 			break;
 		case hwmon_pwm_enable:
-			// fancontrol needs this
+			/* fancontrol wants this */
                         *val = ccp->pwm_enable[channel];
 			break;
 		default:
@@ -384,7 +380,6 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		hid_err(hdev, "Out of memory\n");
 		goto error;
 	}
-        spin_lock_init(&(ccp->lock));
 
 	ccp->fan_enable[0] = 1;
 	ccp->fan_enable[1] = 1;
