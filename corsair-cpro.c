@@ -9,7 +9,7 @@
 
 MODULE_LICENSE("GPL v2");
 
-// should be in usbhid.h
+// from usbhid.h
 #define	hid_to_usb_dev(hid_dev) \
 	to_usb_device(hid_dev->dev.parent->parent)
 
@@ -84,7 +84,7 @@ static int get_usb_data(struct ccp_device *ccp, u8* buffer)
         int ret;
         int actual_length;
 
-//        spin_lock(&(ccp->lock));
+        spin_lock(&(ccp->lock));
 
         ret = usb_bulk_msg(ccp->udev,
                         usb_sndintpipe(ccp->udev, 2),
@@ -110,7 +110,7 @@ static int get_usb_data(struct ccp_device *ccp, u8* buffer)
                 goto exit;
         }
 exit:
-//        spin_unlock(&(ccp->lock));
+        spin_unlock(&(ccp->lock));
         return 0;
 }
 
@@ -218,7 +218,7 @@ static int get_temp_or_rpm(struct ccp_device *ccp, int ctlrequest, int channel, 
 }
 
 static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
-                          u32 attr, int channel)
+                              u32 attr, int channel)
 {
         switch (type) {
         case hwmon_chip:
@@ -299,9 +299,7 @@ static int ccp_read(struct device* dev, enum hwmon_sensor_types type,
 			*val = ccp->pwm[channel];
 			break;
 		case hwmon_pwm_enable:
-			// automatic configuration not yet supported
-			// need more info about device, for now returns
-                        // previous pwm value.
+			// fancontrol needs this
                         *val = ccp->pwm_enable[channel];
 			break;
 		default:
@@ -372,7 +370,7 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	struct usb_device *udev = hid_to_usb_dev(hdev);
 	int retval = 0;
 
-        printk(KERN_ALERT "ccp_probe\n");
+        printk(KERN_ALERT "ccp_probe\n"); // for now...
 
 	retval = hid_parse(hdev);
 	if (retval) {
@@ -405,8 +403,6 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 				ccp,
 				&ccp_chip_info,
 				0);
-
-	printk(KERN_ALERT "HWMon Register\n");
 
         return 0;
 
