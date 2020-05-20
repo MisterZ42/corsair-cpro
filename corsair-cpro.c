@@ -1,8 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * corsair-cpro.c - Linux driver for Corsair Commander Pro
+ * Copyright (C) 2020 Marius Zachmann <mail@mariuszachmann.de>
+ *
+ */
+
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/hid.h>
 #include <linux/hwmon.h>
-#include <linux/spinlock.h>
+#include <linux/mutex.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
@@ -32,6 +39,7 @@ struct ccp_device {
         struct hid_device *hdev;
         struct usb_device *udev;
         struct device *hwmondev;
+	struct mutex lock;
         int temp[4];
         int pwm[6];
 	int fan_mode[6];
@@ -78,10 +86,12 @@ static void dump_data(u8* data, int length)
         return;
 }
 
-static int get_usb_data(struct ccp_device *ccp, u8* buffer)
+static int usb_snd_cmd(struct ccp_device *ccp, u8* buffer)
 {
         int ret;
         int actual_length;
+
+	mutex_lock(&ccp->lock);
 
         ret = usb_bulk_msg(ccp->udev,
                         usb_sndintpipe(ccp->udev, 2),
@@ -107,6 +117,7 @@ static int get_usb_data(struct ccp_device *ccp, u8* buffer)
                 goto exit;
         }
 exit:
+	mutex_unlock(&ccp->lock);
         return 0;
 }
 
@@ -140,7 +151,7 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
         buffer[1] = channel;
         buffer[2] = val;
 
-        ret = get_usb_data(ccp, buffer);
+        ret = usb_snd_cmd(ccp, buffer);
 
         if(ret) {
                 printk(KERN_ALERT "send usb %d ", ret);
@@ -169,7 +180,7 @@ static int get_fan_mode(struct ccp_device *ccp, int channel, const char** mode_d
 
         buffer[0] = 0x20;
 
-        ret = get_usb_data(ccp, buffer);
+        ret = usb_snd_cmd(ccp, buffer);
 	mode = buffer[channel+1];
 	switch(mode) {
 	case 0:
@@ -204,7 +215,7 @@ static int get_temp_or_rpm(struct ccp_device *ccp, int ctlrequest, int channel, 
         buffer[0] = ctlrequest;
         buffer[1] = channel;
 
-        get_usb_data(ccp, buffer);
+        usb_snd_cmd(ccp, buffer);
 
 
         *val = (buffer[1] << 8) + buffer[2];
@@ -380,6 +391,8 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		hid_err(hdev, "Out of memory\n");
 		goto error;
 	}
+
+	mutex_init(&ccp->lock);
 
 	ccp->fan_enable[0] = 1;
 	ccp->fan_enable[1] = 1;
