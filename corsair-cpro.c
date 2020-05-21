@@ -12,6 +12,7 @@
 #include <linux/mutex.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/sysfs.h>
 #include <linux/usb.h>
 
 MODULE_LICENSE("GPL v2");
@@ -34,6 +35,7 @@ MODULE_LICENSE("GPL v2");
 #define CTL_SET_FAN_FPWM 0x23  /* byte 1 is fan number */
                                /* byte 2 is percentage from 0 - 100 */
 
+#define LABEL_LENGTH 10
 
 struct ccp_device {
         struct hid_device *hdev;
@@ -45,6 +47,7 @@ struct ccp_device {
 	int fan_mode[6];
 	int fan_enable[6];
         int pwm_enable[6];
+	char fan_label[6][LABEL_LENGTH];
 
 };
 
@@ -58,12 +61,12 @@ static const struct hwmon_channel_info *ccp_info[] = {
                         HWMON_T_INPUT | HWMON_T_MAX
                         ),
         HWMON_CHANNEL_INFO(fan,
-                        HWMON_F_INPUT | HWMON_F_ENABLE,
-                        HWMON_F_INPUT | HWMON_F_ENABLE,
-                        HWMON_F_INPUT | HWMON_F_ENABLE,
-                        HWMON_F_INPUT | HWMON_F_ENABLE,
-                        HWMON_F_INPUT | HWMON_F_ENABLE,
-                        HWMON_F_INPUT | HWMON_F_ENABLE
+                        HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
+                        HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
+                        HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
+                        HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
+                        HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
+                        HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL
                         ),
         HWMON_CHANNEL_INFO(pwm,
                         HWMON_PWM_INPUT,
@@ -165,7 +168,7 @@ exit:
 
 }
 
-static int get_fan_mode(struct ccp_device *ccp, int channel, const char** mode_desc)
+static int get_fan_mode_label(struct ccp_device *ccp, int channel)
 {
         int ret;
 	int mode;
@@ -184,13 +187,13 @@ static int get_fan_mode(struct ccp_device *ccp, int channel, const char** mode_d
 	mode = buffer[channel+1];
 	switch(mode) {
 	case 0:
-		*mode_desc = "Auto/Disconnect";
+		scnprintf(ccp->fan_label[channel], LABEL_LENGTH, "fan%d nc", channel+1);
 		break;
 	case 1:
-		*mode_desc = "3 Pin";
+		scnprintf(ccp->fan_label[channel], LABEL_LENGTH, "fan%d 3pin", channel+1);
 		break;
 	case 2:
-		*mode_desc = "4 Pin";
+		scnprintf(ccp->fan_label[channel], LABEL_LENGTH, "fan%d 4pin", channel+1);
 		break;
 	default:
 		printk(KERN_ALERT "Mode Description for %d not implemented", mode);
@@ -263,14 +266,37 @@ static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
         }
         return 0;
 };
+static int ccp_read_string(struct device* dev, enum hwmon_sensor_types type,
+			   u32 attr, int channel, const char** str)
+{
+	int err = 0;
+	struct ccp_device *ccp = dev_get_drvdata(dev);
 
+	switch(type) {
+	case hwmon_fan:
+		switch(attr) {
+		case hwmon_fan_label:
+			get_fan_mode_label(ccp, channel);
+			*str = ccp->fan_label[channel];
+			break;
+		default:
+			err = -EINVAL;
+			break;
+		}
+
+	default:
+		err = -EINVAL;
+		break;
+	}
+
+	return 0;
+}
 static int ccp_read(struct device* dev, enum hwmon_sensor_types type,
                     u32 attr, int channel, long *val)
 {
         int err = 0;
-        struct ccp_device *ccp;
+	struct ccp_device *ccp = dev_get_drvdata(dev);
 
-        ccp = dev_get_drvdata(dev);
         switch(type) {
         case hwmon_temp:
                 switch(attr) {
@@ -363,6 +389,7 @@ static const struct hwmon_ops ccp_hwmon_ops = {
         .is_visible = ccp_is_visible,
         .read = ccp_read,
         .write = ccp_write,
+	.read_string = ccp_read_string,
 };
 
 static const struct hwmon_chip_info ccp_chip_info = {
@@ -376,6 +403,7 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
         struct ccp_device *ccp;
 	struct usb_device *udev = hid_to_usb_dev(hdev);
 	int retval = 0;
+	int i = 0;
 
         //printk(KERN_ALERT "ccp_probe\n"); // for now...
 	dev_err(&hdev->dev, "ccp_probe");
@@ -401,6 +429,7 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	ccp->fan_enable[3] = 1;
 	ccp->fan_enable[4] = 1;
 	ccp->fan_enable[5] = 1;
+
 
 	hid_set_drvdata(hdev, ccp);
 
