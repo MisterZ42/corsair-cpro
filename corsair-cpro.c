@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * corsair-cpro.c - Linux driver for Corsair Commander Pro
  * Copyright (C) 2020 Marius Zachmann <mail@mariuszachmann.de>
@@ -101,7 +101,7 @@ static int usb_snd_cmd(struct ccp_device *ccp, u8* buffer)
                         1000);
 
         if(ret) {
-                printk(KERN_ALERT "send usb %d ", ret);
+		dev_err(&ccp->hdev->dev, "usb_bulk_msg send failed");
                 goto exit;
         }
 
@@ -113,7 +113,7 @@ static int usb_snd_cmd(struct ccp_device *ccp, u8* buffer)
                         1000);
 
         if(ret) {
-                printk(KERN_ALERT "rcv usb %d ", ret);
+		dev_err(&ccp->hdev->dev, "usb_bulk_msg receive failed");
                 goto exit;
         }
 exit:
@@ -143,7 +143,7 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
 
         buffer = kzalloc(OUT_BUFFER_SIZE, GFP_KERNEL);
         if (buffer == 0) {
-		dev_err(ccp->hwmondev, "Out of memory\n");
+		dev_err(&ccp->hdev->dev, "Out of memory\n");
                 return -ENOMEM;
         }
 
@@ -154,7 +154,7 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
         ret = usb_snd_cmd(ccp, buffer);
 
         if(ret) {
-                printk(KERN_ALERT "send usb %d ", ret);
+		dev_err(&ccp->hdev->dev, "USB command failed");
                 goto exit;
         }
         return 0;
@@ -174,7 +174,7 @@ static int get_fan_mode(struct ccp_device *ccp, int channel, const char** mode_d
 
         buffer = kzalloc(MAX_BUFFER_SIZE, GFP_KERNEL);
         if (buffer == 0) {
-		dev_err(ccp->hwmondev, "Out of memory\n");
+		dev_err(&ccp->hdev->dev, "Out of memory\n");
                 return -ENOMEM;
         }
 
@@ -208,7 +208,7 @@ static int get_temp_or_rpm(struct ccp_device *ccp, int ctlrequest, int channel, 
 
         buffer = kzalloc(MAX_BUFFER_SIZE, GFP_KERNEL);
         if (buffer == 0) {
-		dev_err(ccp->hwmondev, "Out of memory\n");
+		dev_err(&ccp->hdev->dev, "Out of memory\n");
                 return -ENOMEM;
         }
 
@@ -377,7 +377,8 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	struct usb_device *udev = hid_to_usb_dev(hdev);
 	int retval = 0;
 
-        printk(KERN_ALERT "ccp_probe\n"); // for now...
+        //printk(KERN_ALERT "ccp_probe\n"); // for now...
+	dev_err(&hdev->dev, "ccp_probe");
 
 	retval = hid_parse(hdev);
 	if (retval) {
@@ -411,6 +412,7 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 				ccp,
 				&ccp_chip_info,
 				0);
+
 
         return 0;
 
