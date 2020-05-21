@@ -41,7 +41,6 @@ struct ccp_device {
         struct hid_device *hdev;
         struct usb_device *udev;
         struct device *hwmondev;
-	struct mutex lock;
         int temp[4];
         int pwm[6];
 	int fan_mode[6];
@@ -94,7 +93,7 @@ static int usb_snd_cmd(struct ccp_device *ccp, u8* buffer)
         int ret;
         int actual_length;
 
-	mutex_lock(&ccp->lock);
+	mutex_lock(&ccp->hdev->dev.mutex); /* in case, hidraw tries to use it */
 
         ret = usb_bulk_msg(ccp->udev,
                         usb_sndintpipe(ccp->udev, 2),
@@ -120,7 +119,7 @@ static int usb_snd_cmd(struct ccp_device *ccp, u8* buffer)
                 goto exit;
         }
 exit:
-	mutex_unlock(&ccp->lock);
+	mutex_unlock(&ccp->hdev->dev.mutex);
         return 0;
 }
 
@@ -196,7 +195,7 @@ static int get_fan_mode_label(struct ccp_device *ccp, int channel)
 		scnprintf(ccp->fan_label[channel], LABEL_LENGTH, "fan%d 4pin", channel+1);
 		break;
 	default:
-		printk(KERN_ALERT "Mode Description for %d not implemented", mode);
+		dev_err(&ccp->hdev->dev, "Mode Description for %d not implemented", mode);
 		break;
 	}
 
@@ -420,9 +419,7 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		hid_err(hdev, "Out of memory\n");
 		goto error;
 	}
-
-	mutex_init(&ccp->lock);
-
+	
 	ccp->fan_enable[0] = 1;
 	ccp->fan_enable[1] = 1;
 	ccp->fan_enable[2] = 1;
