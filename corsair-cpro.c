@@ -12,7 +12,6 @@
 #include <linux/mutex.h>
 #include <linux/module.h>
 #include <linux/slab.h>
-#include <linux/sysfs.h>
 #include <linux/usb.h>
 
 MODULE_LICENSE("GPL v2");
@@ -41,6 +40,7 @@ struct ccp_device {
         struct hid_device *hdev;
         struct usb_device *udev;
         struct device *hwmondev;
+	struct mutex mutex;
         int temp[4];
         int pwm[6];
 	int fan_mode[6];
@@ -78,22 +78,13 @@ static const struct hwmon_channel_info *ccp_info[] = {
         NULL
 };
 
-static void dump_data(u8* data, int length)
-{
-        int i;
-        for (i = 0; i < length; i ++) {
-                printk(KERN_ALERT "%x - ", data[i]);
-        }
-        printk(KERN_ALERT "\n");
-        return;
-}
-
 static int usb_snd_cmd(struct ccp_device *ccp, u8* buffer)
 {
         int ret;
         int actual_length;
 
-	mutex_lock(&ccp->hdev->dev.mutex); /* in case, hidraw tries to use it */
+	//mutex_lock(&ccp->hdev->dev.mutex); /* in case, hidraw tries to use it */
+	mutex_lock(&ccp->mutex);
 
         ret = usb_bulk_msg(ccp->udev,
                         usb_sndintpipe(ccp->udev, 2),
@@ -119,7 +110,8 @@ static int usb_snd_cmd(struct ccp_device *ccp, u8* buffer)
                 goto exit;
         }
 exit:
-	mutex_unlock(&ccp->hdev->dev.mutex);
+	//mutex_unlock(&ccp->hdev->dev.mutex);
+	mutex_unlock(&ccp->mutex);
         return 0;
 }
 
@@ -203,7 +195,7 @@ static int get_fan_mode_label(struct ccp_device *ccp, int channel)
         return ret <= 0 ? ret : -EIO;
 }
 
-static int get_temp_or_rpm(struct ccp_device *ccp, int ctlrequest, int channel, long *val)
+static int get_temp(struct ccp_device *ccp, int channel, long *val)
 {
         int ret = 0;
         u8 *buffer;
@@ -214,7 +206,7 @@ static int get_temp_or_rpm(struct ccp_device *ccp, int ctlrequest, int channel, 
                 return -ENOMEM;
         }
 
-        buffer[0] = ctlrequest;
+        buffer[0] = CTL_GET_TMP;
         buffer[1] = channel;
 
         usb_snd_cmd(ccp, buffer);
@@ -226,45 +218,29 @@ static int get_temp_or_rpm(struct ccp_device *ccp, int ctlrequest, int channel, 
         return ret <= 0 ? ret : -EIO;
 }
 
-static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
-                              u32 attr, int channel)
+static int get_rpm(struct ccp_device *ccp, int channel, long *val)
 {
-        switch (type) {
-        case hwmon_chip:
-                switch (attr) {
-                case hwmon_chip_update_interval:
-                        return 0644;
-                }
-                break;
-        case hwmon_temp:
-                switch (attr) {
-                case hwmon_temp_input:
-                        return 0444;
-                }
-                break;
-        case hwmon_fan:
-                switch (attr) {
-                case hwmon_fan_input:
-                        return 0444;
-		case hwmon_fan_label:
-			return 0444;
-		case hwmon_fan_enable:
-			return 0644;
-		}
-                break;
-        case hwmon_pwm:
-                switch (attr) {
-                case hwmon_pwm_input:
-                        return 0644;
-		case hwmon_pwm_enable:
-			return 0644;
-                }
-                break;
-        default:
-                break;
+        int ret = 0;
+        u8 *buffer;
+
+        buffer = kzalloc(MAX_BUFFER_SIZE, GFP_KERNEL);
+        if (buffer == 0) {
+		dev_err(&ccp->hdev->dev, "Out of memory\n");
+                return -ENOMEM;
         }
-        return 0;
-};
+
+        buffer[0] = CTL_GET_FAN_RPM;
+        buffer[1] = channel;
+
+        usb_snd_cmd(ccp, buffer);
+
+
+        *val = (buffer[1] << 8) + buffer[2];
+
+        kfree(buffer);
+        return ret <= 0 ? ret : -EIO;
+}
+
 static int ccp_read_string(struct device* dev, enum hwmon_sensor_types type,
 			   u32 attr, int channel, const char** str)
 {
@@ -282,7 +258,7 @@ static int ccp_read_string(struct device* dev, enum hwmon_sensor_types type,
 			err = -EINVAL;
 			break;
 		}
-
+		break;
 	default:
 		err = -EINVAL;
 		break;
@@ -290,6 +266,7 @@ static int ccp_read_string(struct device* dev, enum hwmon_sensor_types type,
 
 	return 0;
 }
+
 static int ccp_read(struct device* dev, enum hwmon_sensor_types type,
                     u32 attr, int channel, long *val)
 {
@@ -300,7 +277,7 @@ static int ccp_read(struct device* dev, enum hwmon_sensor_types type,
         case hwmon_temp:
                 switch(attr) {
                 case hwmon_temp_input:
-                        get_temp_or_rpm(ccp, CTL_GET_TMP, channel, val);
+                        get_temp(ccp, channel, val);
                         *val = *val * 10;
                         break;
                 default:
@@ -312,7 +289,7 @@ static int ccp_read(struct device* dev, enum hwmon_sensor_types type,
                 switch(attr) {
                 case hwmon_fan_input:
 			if(ccp->fan_enable[channel] == 1) {
-	                        get_temp_or_rpm(ccp, CTL_GET_FAN_RPM, channel, val);
+	                        get_rpm(ccp, channel, val);
 			} else {
 				return -ENODATA;
 			}
@@ -384,6 +361,46 @@ static int ccp_write(struct device* dev, enum hwmon_sensor_types type,
         return err;
 };
 
+static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
+                              u32 attr, int channel)
+{
+        switch (type) {
+        case hwmon_chip:
+                switch (attr) {
+                case hwmon_chip_update_interval:
+                        return 0644;
+                }
+                break;
+        case hwmon_temp:
+                switch (attr) {
+                case hwmon_temp_input:
+                        return 0444;
+                }
+                break;
+        case hwmon_fan:
+                switch (attr) {
+                case hwmon_fan_input:
+                        return 0444;
+		case hwmon_fan_label:
+			return 0444;
+		case hwmon_fan_enable:
+			return 0644;
+		}
+                break;
+        case hwmon_pwm:
+                switch (attr) {
+                case hwmon_pwm_input:
+                        return 0644;
+		case hwmon_pwm_enable:
+			return 0644;
+                }
+                break;
+        default:
+                break;
+        }
+        return 0;
+};
+
 static const struct hwmon_ops ccp_hwmon_ops = {
         .is_visible = ccp_is_visible,
         .read = ccp_read,
@@ -402,7 +419,6 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
         struct ccp_device *ccp;
 	struct usb_device *udev = hid_to_usb_dev(hdev);
 	int retval = 0;
-	int i = 0;
 
         //printk(KERN_ALERT "ccp_probe\n"); // for now...
 	dev_err(&hdev->dev, "ccp_probe");
@@ -419,7 +435,9 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		hid_err(hdev, "Out of memory\n");
 		goto error;
 	}
-	
+
+	mutex_init(&ccp->mutex);
+
 	ccp->fan_enable[0] = 1;
 	ccp->fan_enable[1] = 1;
 	ccp->fan_enable[2] = 1;
