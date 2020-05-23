@@ -16,12 +16,11 @@
 
 MODULE_LICENSE("GPL v2");
 
-/* from usbhid.h */
 #define	hid_to_usb_dev(hid_dev) \
 	to_usb_device(hid_dev->dev.parent->parent)
 
 #define USB_VENDOR_ID_CORSAIR              0x1b1c
-#define USB_VENDOR_ID_CORSAIR_COMMANDERPRO 0x0c10
+#define USB_PRODUCT_ID_CORSAIR_COMMANDERPRO 0x0c10
 
 #define OUT_BUFFER_SIZE 63
 #define IN_BUFFER_SIZE 16
@@ -30,7 +29,7 @@ MODULE_LICENSE("GPL v2");
 
 #define CTL_GET_TMP	 0x11  /* byte 1 is channel, rest zero */
 			       /* returns temp for channel in bytes 1 and 2 */
-#define CTL_GET_FAN_RPM  0x21  /* works exactly like CTL_GET_TMP */
+#define CTL_GET_FAN_RPM  0x21  /* works like CTL_GET_TMP */
 #define CTL_SET_FAN_FPWM 0x23  /* byte 1 is fan number */
 			       /* byte 2 is percentage from 0 - 100 */
 
@@ -41,9 +40,7 @@ struct ccp_device {
 	struct usb_device *udev;
 	struct device *hwmondev;
 	struct mutex mutex;
-	int temp[4];
 	int pwm[6];
-	int fan_mode[6];
 	int fan_enable[6];
 	int pwm_enable[6];
 	char fan_label[6][LABEL_LENGTH];
@@ -91,9 +88,9 @@ static int usb_snd_cmd(struct ccp_device *ccp, u8 *buffer)
 			OUT_BUFFER_SIZE,
 			&actual_length,
 			1000);
-
 	if (ret) {
-		dev_err(&ccp->hdev->dev, "usb_bulk_msg send failed");
+		dev_err(&ccp->hdev->dev,
+			"usb_bulk_msg send failed: %d", ret);
 		goto exit;
 	}
 
@@ -103,9 +100,9 @@ static int usb_snd_cmd(struct ccp_device *ccp, u8 *buffer)
 			IN_BUFFER_SIZE,
 			&actual_length,
 			1000);
-
 	if (ret) {
-		dev_err(&ccp->hdev->dev, "usb_bulk_msg receive failed");
+		dev_err(&ccp->hdev->dev,
+			"usb_bulk_msg receive failed: %d", ret);
 		goto exit;
 	}
 
@@ -133,10 +130,8 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
 	val = val >> 8;
 
 	buffer = kzalloc(OUT_BUFFER_SIZE, GFP_KERNEL);
-	if (buffer == 0) {
-		dev_err(&ccp->hdev->dev, "Out of memory\n");
+	if (buffer == 0)
 		return -ENOMEM;
-	}
 
 	buffer[0] = CTL_SET_FAN_FPWM;
 	buffer[1] = channel;
@@ -154,13 +149,13 @@ static int get_fan_mode_label(struct ccp_device *ccp, int channel)
 	u8 *buffer;
 
 	buffer = kzalloc(MAX_BUFFER_SIZE, GFP_KERNEL);
-	if (buffer == 0) {
-		dev_err(&ccp->hdev->dev, "Out of memory\n");
+	if (buffer == 0)
 		return -ENOMEM;
-	}
 
 	buffer[0] = 0x20;
 	ret = usb_snd_cmd(ccp, buffer);
+	if (ret)
+		goto exit;
 
 	mode = buffer[channel+1];
 
@@ -179,10 +174,11 @@ static int get_fan_mode_label(struct ccp_device *ccp, int channel)
 		break;
 	default:
 		dev_err(&ccp->hdev->dev,
-			"Mode Description for %d not implemented", mode);
+			"Mode Description %d not implemented", mode);
 		break;
 	}
 
+exit:
 	kfree(buffer);
 
 	return ret <= 0 ? ret : -EIO;
@@ -194,18 +190,19 @@ static int get_temp(struct ccp_device *ccp, int channel, long *val)
 	u8 *buffer;
 
 	buffer = kzalloc(MAX_BUFFER_SIZE, GFP_KERNEL);
-	if (buffer == 0) {
-		dev_err(&ccp->hdev->dev, "Out of memory\n");
+	if (buffer == 0)
 		return -ENOMEM;
-	}
 
 	buffer[0] = CTL_GET_TMP;
 	buffer[1] = channel;
 	usb_snd_cmd(ccp, buffer);
+	if (ret)
+		goto exit;
 
 	*val = (buffer[1] << 8) + buffer[2];
 	*val = *val * 10;
 
+exit:
 	kfree(buffer);
 
 	return ret <= 0 ? ret : -EIO;
@@ -217,17 +214,18 @@ static int get_rpm(struct ccp_device *ccp, int channel, long *val)
 	u8 *buffer;
 
 	buffer = kzalloc(MAX_BUFFER_SIZE, GFP_KERNEL);
-	if (buffer == 0) {
-		dev_err(&ccp->hdev->dev, "Out of memory\n");
+	if (buffer == 0)
 		return -ENOMEM;
-	}
 
 	buffer[0] = CTL_GET_FAN_RPM;
 	buffer[1] = channel;
 	usb_snd_cmd(ccp, buffer);
+	if (ret)
+		goto exit;
 
 	*val = (buffer[1] << 8) + buffer[2];
 
+exit:
 	kfree(buffer);
 
 	return ret <= 0 ? ret : -EIO;
@@ -408,8 +406,6 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	struct usb_device *udev = hid_to_usb_dev(hdev);
 	int ret = 0;
 
-	dev_err(&hdev->dev, "ccp_probe");
-
 	ret = hid_parse(hdev);
 	if (ret) {
 		hid_err(hdev, "hid_parse failed\n");
@@ -441,21 +437,20 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 
 exit:
 	return ret;
-
 }
 
 static const struct hid_device_id ccp_devices[] = {
 	{ HID_USB_DEVICE(USB_VENDOR_ID_CORSAIR,
-			 USB_VENDOR_ID_CORSAIR_COMMANDERPRO) },
+			 USB_PRODUCT_ID_CORSAIR_COMMANDERPRO) },
 	{ }
 };
-
-MODULE_DEVICE_TABLE(hid, ccp_devices);
 
 static struct hid_driver ccp_driver = {
 	.name = "corsair-cpro",
 	.id_table = ccp_devices,
 	.probe = ccp_probe,
 };
+
+MODULE_DEVICE_TABLE(hid, ccp_devices);
 
 module_hid_driver(ccp_driver);
