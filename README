@@ -1,12 +1,24 @@
-I created this, so I can use the Corsair Commander Pro with lm_sensors. It is not done yet!!!
+This is a kernel driver for the Corsair Commander Pro.
 
-What it can do:
-Read fan speed
-Read temp sensors
-Set pwm
+Features:
+Recognize connected fans, read fan speeds.
+Read connected thermal sensors.
+Set fan speed with single pwm value.
 
-What it cannot do yet:
+
+If you would like to test it, clone the repository.
+make & insmod corsair-cpro.ko
+
+If you run sensors, it should show up.
+
+Features in /sys/class/hwmon/hwmon*
+fan*_label shows the number and the connection status.
+fan*_input shows the fan speed.
+pwm* is writable and takes numbers from 0-255.
+temp*_input shows the tempature.
+
+What it cannot do (yet):
 Set internal fan curves depending on temp sensors
-Read fan curves
-RGB/LED related things
-Have nice organised code
+Read fan curves (maybe not possible)
+Read voltage values
+RGB related things
