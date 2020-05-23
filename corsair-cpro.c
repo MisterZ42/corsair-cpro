@@ -412,6 +412,8 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		goto exit;
 	}
 
+	printk(KERN_ALERT "corsair-cpro: Found Corsair Commander Pro");
+
 	ccp = devm_kzalloc(&hdev->dev, sizeof(struct ccp_device), GFP_KERNEL);
 	if (ccp == NULL)
 		goto exit;
