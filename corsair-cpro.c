@@ -19,8 +19,9 @@ MODULE_LICENSE("GPL v2");
 #define	hid_to_usb_dev(hid_dev) \
 	to_usb_device(hid_dev->dev.parent->parent)
 
-#define USB_VENDOR_ID_CORSAIR              0x1b1c
+#define USB_VENDOR_ID_CORSAIR               0x1b1c
 #define USB_PRODUCT_ID_CORSAIR_COMMANDERPRO 0x0c10
+#define USB_PRODUCT_ID_CORSAIR_1000D	    0x1d00
 
 #define OUT_BUFFER_SIZE 63
 #define IN_BUFFER_SIZE 16
@@ -444,6 +445,8 @@ exit:
 static const struct hid_device_id ccp_devices[] = {
 	{ HID_USB_DEVICE(USB_VENDOR_ID_CORSAIR,
 			 USB_PRODUCT_ID_CORSAIR_COMMANDERPRO) },
+	{ HID_USB_DEVICE(USB_VENDOR_ID_CORSAIR,
+			 USB_PRODUCT_ID_CORSAIR_1000D) },
 	{ }
 };
 
