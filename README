@@ -4,6 +4,7 @@ Features:
 Recognize connected fans, read fan speeds.
 Read connected thermal sensors.
 Set fan speed with single pwm value.
+Read voltage values.
 
 
 If you would like to test it, clone the repository.
@@ -16,11 +17,13 @@ fan*_label shows the number and the connection status.
 fan*_input shows the fan speed.
 pwm* is writable and takes numbers from 0-255.
 temp*_input shows the tempature.
+in0_label voltage on 12v rail
+in1_label voltage on 5v rail
+in2_label voltage on 3.3v rail
 
 What it cannot do (yet):
 Set internal fan curves depending on temp sensors
 Read fan curves (maybe not possible)
-Read voltage values
 RGB related things
 
 DISCLAIMER:
