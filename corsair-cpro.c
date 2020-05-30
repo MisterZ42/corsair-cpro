@@ -30,7 +30,9 @@ MODULE_LICENSE("GPL v2");
 
 #define CTL_GET_TMP	 0x11  /* byte 1 is channel, rest zero */
 			       /* returns temp for channel in bytes 1 and 2 */
-#define CTL_GET_FAN_RPM  0x21  /* works like CTL_GET_TMP */
+#define CTL_GET_VOLT	 0x12  /* byte 1 = rail number 12, 5, 3.3 */
+			       /* returns volt in BE * 1000 */
+#define CTL_GET_FAN_RPM	 0x21  /* works like CTL_GET_TMP */
 #define CTL_SET_FAN_FPWM 0x23  /* byte 1 is fan number */
 			       /* byte 2 is percentage from 0 - 100 */
 
@@ -72,6 +74,11 @@ static const struct hwmon_channel_info *ccp_info[] = {
 			HWMON_PWM_INPUT,
 			HWMON_PWM_INPUT,
 			HWMON_PWM_INPUT
+			),
+	HWMON_CHANNEL_INFO(in,
+			HWMON_I_INPUT,
+			HWMON_I_INPUT,
+			HWMON_I_INPUT
 			),
 	NULL
 };
@@ -185,6 +192,29 @@ exit:
 	return ret <= 0 ? ret : -EIO;
 }
 
+static int get_voltages(struct ccp_device *ccp, int channel, long *val)
+{
+	int ret = 0;
+	u8 *buffer;
+
+	buffer = kzalloc(MAX_BUFFER_SIZE, GFP_KERNEL);
+	if (buffer == 0)
+		return -ENOMEM;
+
+	buffer[0] = CTL_GET_VOLT;
+	buffer[1] = channel;
+	ret = usb_snd_cmd(ccp, buffer);
+	if (ret)
+		goto exit;
+
+	*val = (buffer[1] << 8) + buffer[2];
+
+exit:
+	kfree(buffer);
+
+	return ret;
+}
+
 static int get_temp(struct ccp_device *ccp, int channel, long *val)
 {
 	int ret = 0;
@@ -196,7 +226,7 @@ static int get_temp(struct ccp_device *ccp, int channel, long *val)
 
 	buffer[0] = CTL_GET_TMP;
 	buffer[1] = channel;
-	usb_snd_cmd(ccp, buffer);
+	ret = usb_snd_cmd(ccp, buffer);
 	if (ret)
 		goto exit;
 
@@ -305,6 +335,16 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 			break;
 		}
 		break;
+	case hwmon_in:
+		switch (attr) {
+		case hwmon_in_input:
+			ret = get_voltages(ccp, channel, val);
+			break;
+		default:
+			ret = -EINVAL;
+			break;
+		}
+		break;
 	default:
 		ret = -EINVAL;
 	}
@@ -380,6 +420,12 @@ static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
 			return 0644;
 		case hwmon_pwm_enable:
 			return 0644;
+		}
+		break;
+	case hwmon_in:
+		switch (attr) {
+		case hwmon_in_input:
+			return 0444;
 		}
 		break;
 	default:
