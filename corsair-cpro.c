@@ -83,7 +83,7 @@ static const struct hwmon_channel_info *ccp_info[] = {
 	NULL
 };
 
-static int usb_snd_cmd(struct ccp_device *ccp, u8 *buffer)
+static int send_usb_cmd(struct ccp_device *ccp, u8 *buffer)
 {
 	int ret;
 	int actual_length;
@@ -120,6 +120,27 @@ exit:
 	return ret;
 }
 
+static int get_data(struct ccp_device *ccp, int command, int channel, long *val)
+{
+	int ret = 0;
+	u8 *buffer;
+
+	buffer = kzalloc(OUT_BUFFER_SIZE, GFP_KERNEL);
+	if (buffer == 0)
+		return -ENOMEM;
+
+	buffer[0] = command;
+	buffer[1] = channel;
+	ret = send_usb_cmd(ccp, buffer);
+	if (ret)
+		return -EIO;
+
+	*val = (buffer[1] << 8) + buffer[2];
+
+	kfree(buffer);
+	return 0;
+}
+
 static int set_pwm(struct ccp_device *ccp, int channel, long val)
 {
 	int ret = 0;
@@ -129,9 +150,8 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
 		return -EINVAL;
 
 	ccp->pwm[channel] = val;
-	/* The Corsair Commander Pro uses values from 0-100 */
-	/* so I need to convert it. */
 
+	/* The Corsair Commander Pro uses values from 0-100 */
 	val = val << 8;
 	val = val / 255;
 	val = val * 100;
@@ -144,7 +164,7 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
 	buffer[0] = CTL_SET_FAN_FPWM;
 	buffer[1] = channel;
 	buffer[2] = val;
-	ret = usb_snd_cmd(ccp, buffer);
+	ret = send_usb_cmd(ccp, buffer);
 
 	kfree(buffer);
 	return ret <= 0 ? ret : -EIO;
@@ -161,7 +181,7 @@ static int get_fan_mode_label(struct ccp_device *ccp, int channel)
 		return -ENOMEM;
 
 	buffer[0] = 0x20;
-	ret = usb_snd_cmd(ccp, buffer);
+	ret = send_usb_cmd(ccp, buffer);
 	if (ret)
 		goto exit;
 
@@ -195,46 +215,18 @@ exit:
 static int get_voltages(struct ccp_device *ccp, int channel, long *val)
 {
 	int ret = 0;
-	u8 *buffer;
 
-	buffer = kzalloc(MAX_BUFFER_SIZE, GFP_KERNEL);
-	if (buffer == 0)
-		return -ENOMEM;
+	ret = get_data(ccp, CTL_GET_VOLT, channel, val);
 
-	buffer[0] = CTL_GET_VOLT;
-	buffer[1] = channel;
-	ret = usb_snd_cmd(ccp, buffer);
-	if (ret)
-		goto exit;
-
-	*val = (buffer[1] << 8) + buffer[2];
-
-exit:
-	kfree(buffer);
-
-	return ret;
+	return ret <= 0 ? ret : -EIO;
 }
 
 static int get_temp(struct ccp_device *ccp, int channel, long *val)
 {
 	int ret = 0;
-	u8 *buffer;
 
-	buffer = kzalloc(MAX_BUFFER_SIZE, GFP_KERNEL);
-	if (buffer == 0)
-		return -ENOMEM;
-
-	buffer[0] = CTL_GET_TMP;
-	buffer[1] = channel;
-	ret = usb_snd_cmd(ccp, buffer);
-	if (ret)
-		goto exit;
-
-	*val = (buffer[1] << 8) + buffer[2];
+	ret = get_data(ccp, CTL_GET_TMP, channel, val);
 	*val = *val * 10;
-
-exit:
-	kfree(buffer);
 
 	return ret <= 0 ? ret : -EIO;
 }
@@ -242,22 +234,11 @@ exit:
 static int get_rpm(struct ccp_device *ccp, int channel, long *val)
 {
 	int ret = 0;
-	u8 *buffer;
 
-	buffer = kzalloc(MAX_BUFFER_SIZE, GFP_KERNEL);
-	if (buffer == 0)
-		return -ENOMEM;
+	if (ccp->fan_enable[channel] != 1)
+		return -ENODATA;
 
-	buffer[0] = CTL_GET_FAN_RPM;
-	buffer[1] = channel;
-	usb_snd_cmd(ccp, buffer);
-	if (ret)
-		goto exit;
-
-	*val = (buffer[1] << 8) + buffer[2];
-
-exit:
-	kfree(buffer);
+	ret = get_data(ccp, CTL_GET_FAN_RPM, channel, val);
 
 	return ret <= 0 ? ret : -EIO;
 }
@@ -308,10 +289,7 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 	case hwmon_fan:
 		switch (attr) {
 		case hwmon_fan_input:
-			if (ccp->fan_enable[channel] == 1)
-				ret = get_rpm(ccp, channel, val);
-			else
-				ret = -ENODATA;
+			ret = get_rpm(ccp, channel, val);
 			break;
 		case hwmon_fan_enable:
 			*val = ccp->fan_enable[channel];
