@@ -14,8 +14,6 @@
 #include <linux/slab.h>
 #include <linux/usb.h>
 
-MODULE_LICENSE("GPL v2");
-
 #define	hid_to_usb_dev(hid_dev) \
 	to_usb_device(hid_dev->dev.parent->parent)
 
@@ -25,18 +23,18 @@ MODULE_LICENSE("GPL v2");
 
 #define OUT_BUFFER_SIZE 63
 #define IN_BUFFER_SIZE 16
-#define MAX_BUFFER_SIZE 63
+#define LABEL_LENGTH 10
 
-
-#define CTL_GET_TMP	 0x11  /* byte 1 is channel, rest zero */
+#define CTL_GET_TMP	 0x11  /* byte 1 is channel, rest zero              */
 			       /* returns temp for channel in bytes 1 and 2 */
 #define CTL_GET_VOLT	 0x12  /* byte 1 = rail number 12, 5, 3.3 */
-			       /* returns volt in BE * 1000 */
+			       /* returns volt in bytes 1,2       */
+#define CTL_GET_FAN_CNCT 0x20  /* returns in bytes 1-6   */
+			       /* 0 for no connect       */
+			       /* 1 for 3pin, 2 for 4pin */
 #define CTL_GET_FAN_RPM	 0x21  /* works like CTL_GET_TMP */
-#define CTL_SET_FAN_FPWM 0x23  /* byte 1 is fan number */
+#define CTL_SET_FAN_FPWM 0x23  /* byte 1 is fan number              */
 			       /* byte 2 is percentage from 0 - 100 */
-
-#define LABEL_LENGTH 10
 
 struct ccp_device {
 	struct hid_device *hdev;
@@ -45,44 +43,11 @@ struct ccp_device {
 	struct mutex mutex;
 	int pwm[6];
 	int fan_enable[6];
-	int pwm_enable[6];
 	char fan_label[6][LABEL_LENGTH];
 
 };
 
-static const struct hwmon_channel_info *ccp_info[] = {
-	HWMON_CHANNEL_INFO(chip,
-			HWMON_C_REGISTER_TZ | HWMON_C_UPDATE_INTERVAL),
-	HWMON_CHANNEL_INFO(temp,
-			HWMON_T_INPUT | HWMON_T_MAX,
-			HWMON_T_INPUT | HWMON_T_MAX,
-			HWMON_T_INPUT | HWMON_T_MAX,
-			HWMON_T_INPUT | HWMON_T_MAX
-			),
-	HWMON_CHANNEL_INFO(fan,
-			HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
-			HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
-			HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
-			HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
-			HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
-			HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL
-			),
-	HWMON_CHANNEL_INFO(pwm,
-			HWMON_PWM_INPUT,
-			HWMON_PWM_INPUT,
-			HWMON_PWM_INPUT,
-			HWMON_PWM_INPUT,
-			HWMON_PWM_INPUT,
-			HWMON_PWM_INPUT
-			),
-	HWMON_CHANNEL_INFO(in,
-			HWMON_I_INPUT,
-			HWMON_I_INPUT,
-			HWMON_I_INPUT
-			),
-	NULL
-};
-
+/* send 63 byte buffer and receive response in same buffer */
 static int send_usb_cmd(struct ccp_device *ccp, u8 *buffer)
 {
 	int ret;
@@ -120,6 +85,8 @@ exit:
 	return ret;
 }
 
+/* for commands, which return just a number depending on a channel: */
+/* get_temp, get_volt, get_fan_rpm */
 static int get_data(struct ccp_device *ccp, int command, int channel, long *val)
 {
 	int ret = 0;
@@ -176,11 +143,11 @@ static int get_fan_mode_label(struct ccp_device *ccp, int channel)
 	int mode;
 	u8 *buffer;
 
-	buffer = kzalloc(MAX_BUFFER_SIZE, GFP_KERNEL);
+	buffer = kzalloc(OUT_BUFFER_SIZE, GFP_KERNEL);
 	if (buffer == 0)
 		return -ENOMEM;
 
-	buffer[0] = 0x20;
+	buffer[0] = CTL_GET_FAN_CNCT;
 	ret = send_usb_cmd(ccp, buffer);
 	if (ret)
 		goto exit;
@@ -208,7 +175,6 @@ static int get_fan_mode_label(struct ccp_device *ccp, int channel)
 
 exit:
 	kfree(buffer);
-
 	return ret <= 0 ? ret : -EIO;
 }
 
@@ -304,10 +270,6 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 		case hwmon_pwm_input:
 			*val = ccp->pwm[channel];
 			break;
-		case hwmon_pwm_enable:
-			/* fancontrol wants this */
-			*val = ccp->pwm_enable[channel];
-			break;
 		default:
 			ret = -EINVAL;
 			break;
@@ -351,9 +313,6 @@ static int ccp_write(struct device *dev, enum hwmon_sensor_types type,
 		case hwmon_pwm_input:
 			set_pwm(ccp, channel, val);
 			break;
-		case hwmon_pwm_enable:
-			ccp->pwm_enable[channel] = val;
-			break;
 		default:
 			ret = -EINVAL;
 			break;
@@ -396,8 +355,6 @@ static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
 		switch (attr) {
 		case hwmon_pwm_input:
 			return 0644;
-		case hwmon_pwm_enable:
-			return 0644;
 		}
 		break;
 	case hwmon_in:
@@ -417,6 +374,39 @@ static const struct hwmon_ops ccp_hwmon_ops = {
 	.read = ccp_read,
 	.write = ccp_write,
 	.read_string = ccp_read_string,
+};
+
+static const struct hwmon_channel_info *ccp_info[] = {
+	HWMON_CHANNEL_INFO(chip,
+			   HWMON_C_REGISTER_TZ | HWMON_C_UPDATE_INTERVAL),
+	HWMON_CHANNEL_INFO(temp,
+			   HWMON_T_INPUT | HWMON_T_MAX,
+			   HWMON_T_INPUT | HWMON_T_MAX,
+			   HWMON_T_INPUT | HWMON_T_MAX,
+			   HWMON_T_INPUT | HWMON_T_MAX
+			   ),
+	HWMON_CHANNEL_INFO(fan,
+			   HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
+			   HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
+			   HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
+			   HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
+			   HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
+			   HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL
+			   ),
+	HWMON_CHANNEL_INFO(pwm,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT,
+			   HWMON_PWM_INPUT
+			   ),
+	HWMON_CHANNEL_INFO(in,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT,
+			   HWMON_I_INPUT
+			   ),
+	NULL
 };
 
 static const struct hwmon_chip_info ccp_chip_info = {
@@ -466,6 +456,15 @@ exit:
 	return ret;
 }
 
+static void ccp_remove(struct hid_device *hdev)
+{
+	struct ccp_device *ccp;
+
+	ccp = hid_get_drvdata(hdev);
+	mutex_destroy(&ccp->mutex);
+
+}
+
 static const struct hid_device_id ccp_devices[] = {
 	{ HID_USB_DEVICE(USB_VENDOR_ID_CORSAIR,
 			 USB_PRODUCT_ID_CORSAIR_COMMANDERPRO) },
@@ -478,8 +477,10 @@ static struct hid_driver ccp_driver = {
 	.name = "corsair-cpro",
 	.id_table = ccp_devices,
 	.probe = ccp_probe,
+	.remove = ccp_remove
 };
 
 MODULE_DEVICE_TABLE(hid, ccp_devices);
+MODULE_LICENSE("GPL v2");
 
 module_hid_driver(ccp_driver);
