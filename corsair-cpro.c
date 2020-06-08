@@ -38,7 +38,6 @@
 
 struct ccp_device {
 	struct hid_device *hdev;
-	struct usb_device *udev;
 	struct device *hwmondev;
 	struct mutex mutex;
 	int pwm[6];
@@ -51,37 +50,38 @@ struct ccp_device {
 static int send_usb_cmd(struct ccp_device *ccp, u8 *buffer)
 {
 	int ret;
+	struct usb_device *udev = hid_to_usb_dev(ccp->hdev);
 	int actual_length;
+
 
 	mutex_lock(&ccp->mutex);
 
-	ret = usb_bulk_msg(ccp->udev,
-			usb_sndintpipe(ccp->udev, 2),
+	ret = usb_bulk_msg(udev,
+			usb_sndintpipe(udev, 2),
 			buffer,
 			OUT_BUFFER_SIZE,
 			&actual_length,
 			1000);
-	if (ret) {
-		dev_err(&ccp->hdev->dev,
+	if (ret < 0) {
+		hid_err(ccp->hdev,
 			"usb_bulk_msg send failed: %d", ret);
 		goto exit;
 	}
 
-	ret = usb_bulk_msg(ccp->udev,
-			usb_rcvintpipe(ccp->udev, 1),
+	ret = usb_bulk_msg(udev,
+			usb_rcvintpipe(udev, 1),
 			buffer,
 			IN_BUFFER_SIZE,
 			&actual_length,
 			1000);
 	if (ret) {
-		dev_err(&ccp->hdev->dev,
+		hid_err(ccp->hdev,
 			"usb_bulk_msg receive failed: %d", ret);
 		goto exit;
 	}
 
 exit:
 	mutex_unlock(&ccp->mutex);
-
 	return ret;
 }
 
@@ -105,7 +105,7 @@ static int get_data(struct ccp_device *ccp, int command, int channel, long *val)
 	*val = (buffer[1] << 8) + buffer[2];
 
 	kfree(buffer);
-	return 0;
+	return ret;
 }
 
 static int set_pwm(struct ccp_device *ccp, int channel, long val)
@@ -134,7 +134,7 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
 	ret = send_usb_cmd(ccp, buffer);
 
 	kfree(buffer);
-	return ret <= 0 ? ret : -EIO;
+	return ret == 0 ? 0 : -EIO;
 }
 
 static int get_fan_mode_label(struct ccp_device *ccp, int channel)
@@ -175,7 +175,7 @@ static int get_fan_mode_label(struct ccp_device *ccp, int channel)
 
 exit:
 	kfree(buffer);
-	return ret <= 0 ? ret : -EIO;
+	return ret == 0 ? 0 : -EIO;
 }
 
 static int get_voltages(struct ccp_device *ccp, int channel, long *val)
@@ -184,7 +184,7 @@ static int get_voltages(struct ccp_device *ccp, int channel, long *val)
 
 	ret = get_data(ccp, CTL_GET_VOLT, channel, val);
 
-	return ret <= 0 ? ret : -EIO;
+	return ret == 0 ? 0 : -EIO;
 }
 
 static int get_temp(struct ccp_device *ccp, int channel, long *val)
@@ -194,7 +194,7 @@ static int get_temp(struct ccp_device *ccp, int channel, long *val)
 	ret = get_data(ccp, CTL_GET_TMP, channel, val);
 	*val = *val * 10;
 
-	return ret <= 0 ? ret : -EIO;
+	return ret == 0 ? 0 : -EIO;
 }
 
 static int get_rpm(struct ccp_device *ccp, int channel, long *val)
@@ -206,7 +206,7 @@ static int get_rpm(struct ccp_device *ccp, int channel, long *val)
 
 	ret = get_data(ccp, CTL_GET_FAN_RPM, channel, val);
 
-	return ret <= 0 ? ret : -EIO;
+	return ret == 0 ? 0 : -EIO;
 }
 
 static int ccp_read_string(struct device *dev, enum hwmon_sensor_types type,
@@ -418,7 +418,6 @@ static const struct hwmon_chip_info ccp_chip_info = {
 static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 {
 	struct ccp_device *ccp;
-	struct usb_device *udev = hid_to_usb_dev(hdev);
 	int ret = 0;
 
 	ret = hid_parse(hdev);
@@ -426,8 +425,6 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		hid_err(hdev, "hid_parse failed\n");
 		goto exit;
 	}
-
-	printk(KERN_ALERT "corsair-cpro: Found Corsair Commander Pro");
 
 	ccp = devm_kzalloc(&hdev->dev, sizeof(struct ccp_device), GFP_KERNEL);
 	if (ccp == NULL)
@@ -444,7 +441,6 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 
 	hid_set_drvdata(hdev, ccp);
 
-	ccp->udev = usb_get_dev(udev);
 	ccp->hdev = hdev;
 	ccp->hwmondev = devm_hwmon_device_register_with_info(&hdev->dev,
 				"corsaircpro",
@@ -462,7 +458,6 @@ static void ccp_remove(struct hid_device *hdev)
 
 	ccp = hid_get_drvdata(hdev);
 	mutex_destroy(&ccp->mutex);
-
 }
 
 static const struct hid_device_id ccp_devices[] = {
