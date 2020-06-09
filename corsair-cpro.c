@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * corsair-cpro.c - Linux driver for Corsair Commander Pro
  * Copyright (C) 2020 Marius Zachmann <mail@mariuszachmann.de>
