@@ -6,15 +6,12 @@
 
 #include <linux/init.h>
 #include <linux/kernel.h>
-#include <linux/hid.h>
 #include <linux/hwmon.h>
 #include <linux/mutex.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
 
-#define	hid_to_usb_dev(hid_dev) \
-	to_usb_device(hid_dev->dev.parent->parent)
 #define USB_VENDOR_ID_CORSAIR               0x1b1c
 #define USB_PRODUCT_ID_CORSAIR_COMMANDERPRO 0x0c10
 #define USB_PRODUCT_ID_CORSAIR_1000D	    0x1d00
@@ -35,7 +32,7 @@
 			       /* byte 2 is percentage from 0 - 100 */
 
 struct ccp_device {
-	struct hid_device *hdev;
+	struct usb_device *udev;
 	struct mutex mutex; /* whenever buffer is used and usb calls are made */
 	u8 *buffer;
 	int pwm[6];
@@ -47,20 +44,19 @@ struct ccp_device {
 static int send_usb_cmd(struct ccp_device *ccp)
 {
 	int ret;
-	struct usb_device *udev = hid_to_usb_dev(ccp->hdev);
 	int actual_length;
 
-	ret = usb_bulk_msg(udev, usb_sndintpipe(udev, 2), ccp->buffer, OUT_BUFFER_SIZE,
+	ret = usb_bulk_msg(ccp->udev, usb_sndintpipe(ccp->udev, 2), ccp->buffer, OUT_BUFFER_SIZE,
 			   &actual_length, 1000);
 	if (ret) {
-		hid_err(ccp->hdev, "usb_bulk_msg send failed: %d", ret);
+		dev_err(&ccp->udev->dev, "usb_bulk_msg send failed: %d", ret);
 		goto exit;
 	}
 
-	ret = usb_bulk_msg(udev, usb_rcvintpipe(udev, 1), ccp->buffer, IN_BUFFER_SIZE,
+	ret = usb_bulk_msg(ccp->udev, usb_rcvintpipe(ccp->udev, 1), ccp->buffer, IN_BUFFER_SIZE,
 			   &actual_length, 1000);
 	if (ret) {
-		hid_err(ccp->hdev, "usb_bulk_msg receive failed: %d", ret);
+		dev_err(&ccp->udev->dev, "usb_bulk_msg receive failed: %d", ret);
 		goto exit;
 	}
 
@@ -403,26 +399,19 @@ static const struct hwmon_channel_info *ccp_info[] = {
 static const struct hwmon_chip_info ccp_chip_info = {
 	.ops = &ccp_hwmon_ops,
 	.info = ccp_info,
-
 };
 
-static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
+static int ccp_probe(struct usb_interface *intf, const struct usb_device_id *id)
 {
 	struct ccp_device *ccp;
 	struct device *hwmon_dev;
-	int ret = 0;
+	struct usb_device *udev = interface_to_usbdev(intf);
 
-	ret = hid_parse(hdev);
-	if (ret) {
-		hid_err(hdev, "hid_parse failed\n");
-		return ret;
-	}
-
-	ccp = devm_kzalloc(&hdev->dev, sizeof(struct ccp_device), GFP_KERNEL);
+	ccp = devm_kzalloc(&udev->dev, sizeof(struct ccp_device), GFP_KERNEL);
 	if (!ccp)
 		return -ENOMEM;
 
-	ccp->buffer = devm_kmalloc(&hdev->dev, OUT_BUFFER_SIZE, GFP_KERNEL);
+	ccp->buffer = devm_kmalloc(&udev->dev, OUT_BUFFER_SIZE, GFP_KERNEL);
 	if (!ccp->buffer)
 		return -ENOMEM;
 
@@ -434,30 +423,29 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	ccp->fan_enable[3] = 1;
 	ccp->fan_enable[4] = 1;
 	ccp->fan_enable[5] = 1;
-	ccp->hdev = hdev;
+	ccp->udev = udev;
 
-	hwmon_dev = devm_hwmon_device_register_with_info(&hdev->dev, "corsaircpro", ccp,
+	hwmon_dev = devm_hwmon_device_register_with_info(&udev->dev, "corsaircpro", ccp,
 							 &ccp_chip_info, 0);
 
 	return PTR_ERR_OR_ZERO(hwmon_dev);
 }
 
-static const struct hid_device_id ccp_devices[] = {
-	{ HID_USB_DEVICE(USB_VENDOR_ID_CORSAIR,
+static const struct usb_device_id ccp_devices[] = {
+	{ USB_DEVICE(USB_VENDOR_ID_CORSAIR,
 			 USB_PRODUCT_ID_CORSAIR_COMMANDERPRO) },
-	{ HID_USB_DEVICE(USB_VENDOR_ID_CORSAIR,
+	{ USB_DEVICE(USB_VENDOR_ID_CORSAIR,
 			 USB_PRODUCT_ID_CORSAIR_1000D) },
 	{ }
 };
 
-static struct hid_driver ccp_driver = {
+static struct usb_driver ccp_driver = {
 	.name = "corsair-cpro",
 	.id_table = ccp_devices,
 	.probe = ccp_probe
 };
 
-MODULE_DEVICE_TABLE(hid, ccp_devices);
+MODULE_DEVICE_TABLE(usb, ccp_devices);
 MODULE_LICENSE("GPL");
-MODULE_SOFTDEP("pre: hid");
 
-module_hid_driver(ccp_driver);
+module_usb_driver(ccp_driver);
