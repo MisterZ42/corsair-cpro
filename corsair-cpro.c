@@ -4,11 +4,10 @@
  * Copyright (C) 2020 Marius Zachmann <mail@mariuszachmann.de>
  */
 
-#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/hwmon.h>
-#include <linux/mutex.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
 
@@ -18,65 +17,109 @@
 
 #define OUT_BUFFER_SIZE	63
 #define IN_BUFFER_SIZE	16
-#define LABEL_LENGTH	11
+#define LABEL_LENGTH	12
 
-#define CTL_GET_TMP	 0x11  /* byte 1 is channel, rest zero              */
-			       /* returns temp for channel in bytes 1 and 2 */
-#define CTL_GET_VOLT	 0x12  /* byte 1 = rail number 12, 5, 3.3 */
-			       /* returns volt in bytes 1,2       */
-#define CTL_GET_FAN_CNCT 0x20  /* returns in bytes 1-6   */
-			       /* 0 for no connect       */
-			       /* 1 for 3pin, 2 for 4pin */
-#define CTL_GET_FAN_RPM	 0x21  /* works like CTL_GET_TMP */
-#define CTL_SET_FAN_FPWM 0x23  /* byte 1 is fan number              */
-			       /* byte 2 is percentage from 0 - 100 */
+#define CTL_GET_TMP_CNCT 0x10 /*
+			       * returns in bytes 1-4 for each temp sensor:
+			       * 0 not connected
+			       * 1 connected
+			       */
+#define CTL_GET_TMP	 0x11 /*
+			       * send: byte 1 is channel, rest zero
+			       * rcv:  returns temp for channel in bytes 1 and 2
+			       * returns 17 in byte 0 if no sensor is connected
+			       */
+#define CTL_GET_VOLT	 0x12 /*
+			       * send: byte 1 is rail number: 0 = 12v, 1 = 5v, 2 = 3.3v
+			       * rcv:  returns volt in bytes 1,2
+			       */
+#define CTL_GET_FAN_CNCT 0x20 /*
+			       * returns in bytes 1-6 for each fan:
+			       * 0 not connected
+			       * 1 3pin
+			       * 2 4pin
+			       */
+#define CTL_GET_FAN_RPM	 0x21 /*
+			       * send: byte 1 is channel, rest zero
+			       * rcv:  returns rpm in bytes 1,2
+			       */
+#define CTL_SET_FAN_FPWM 0x23 /*
+			       * set fixed pwm
+			       * send: byte 1 is fan number
+			       * send: byte 2 is percentage from 0 - 100
+			       */
 
 struct ccp_device {
 	struct usb_device *udev;
+<<<<<<< HEAD
+	struct mutex mutex; /* whenever buffer is used, lock before send_usb_cmd */
+=======
 	struct mutex mutex; /* whenever buffer is used and usb calls are made */
+>>>>>>> 0af2a15... usb branch
 	u8 *buffer;
 	int pwm[6];
-	int fan_enable[6];
 	char fan_label[6][LABEL_LENGTH];
+	int temp_cnct[4];
+	char temp_label[4][LABEL_LENGTH];
 };
 
-/* send 63 byte buffer and receive response in same buffer */
-static int send_usb_cmd(struct ccp_device *ccp)
+/* send command, check for error in response, response in ccp->buffer */
+static int send_usb_cmd(struct ccp_device *ccp, u8 command, u8 byte1, u8 byte2)
 {
+<<<<<<< HEAD
+=======
 	int ret;
+>>>>>>> 0af2a15... usb branch
 	int actual_length;
+	int ret;
+
+	memset(ccp->buffer, 0x00, OUT_BUFFER_SIZE);
+	ccp->buffer[0] = command;
+	ccp->buffer[1] = byte1;
+	ccp->buffer[2] = byte2;
 
 	ret = usb_bulk_msg(ccp->udev, usb_sndintpipe(ccp->udev, 2), ccp->buffer, OUT_BUFFER_SIZE,
 			   &actual_length, 1000);
 	if (ret) {
 		dev_err(&ccp->udev->dev, "usb_bulk_msg send failed: %d", ret);
+<<<<<<< HEAD
+		return ret;
+	}
+
+	/* response needs to be received every time */
+=======
 		goto exit;
 	}
 
+>>>>>>> 0af2a15... usb branch
 	ret = usb_bulk_msg(ccp->udev, usb_rcvintpipe(ccp->udev, 1), ccp->buffer, IN_BUFFER_SIZE,
 			   &actual_length, 1000);
 	if (ret) {
 		dev_err(&ccp->udev->dev, "usb_bulk_msg receive failed: %d", ret);
+<<<<<<< HEAD
+		return ret;
+=======
 		goto exit;
+>>>>>>> 0af2a15... usb branch
 	}
 
-exit:
-	mutex_unlock(&ccp->mutex);
-	return ret;
+	/* first byte of response is error code */
+	if (ccp->buffer[0] != 0x00) {
+		dev_err(&ccp->udev->dev, "device response error: %d", ccp->buffer[0]);
+		return -EIO;
+	}
+
+	return 0;
 }
 
 /* for commands, which return just a number depending on a channel: */
-/* get_temp, get_volt, get_fan_rpm */
 static int get_data(struct ccp_device *ccp, int command, int channel, long *val)
 {
 	int ret;
 
 	mutex_lock(&ccp->mutex);
 
-	memset(ccp->buffer, 0x00, OUT_BUFFER_SIZE);
-	ccp->buffer[0] = command;
-	ccp->buffer[1] = channel;
-	ret = send_usb_cmd(ccp);
+	ret = send_usb_cmd(ccp, command, channel, 0);
 	if (ret)
 		goto exit;
 
@@ -101,44 +144,46 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
 
 	mutex_lock(&ccp->mutex);
 
-	memset(ccp->buffer, 0x00, OUT_BUFFER_SIZE);
-	ccp->buffer[0] = CTL_SET_FAN_FPWM;
-	ccp->buffer[1] = channel;
-	ccp->buffer[2] = val;
-	ret = send_usb_cmd(ccp);
+	ret = send_usb_cmd(ccp, CTL_SET_FAN_FPWM, channel, val);
 
 	mutex_unlock(&ccp->mutex);
 	return ret;
 }
 
-static int get_fan_mode_label(struct ccp_device *ccp, int channel)
+/* read fan connection status and set labels */
+static int get_fan_cnct(struct ccp_device *ccp)
 {
-	int ret;
+	int channel;
 	int mode;
+	int ret;
 
 	mutex_lock(&ccp->mutex);
 
-	memset(ccp->buffer, 0x00, OUT_BUFFER_SIZE);
-	ccp->buffer[0] = CTL_GET_FAN_CNCT;
-	ret = send_usb_cmd(ccp);
+	ret = send_usb_cmd(ccp, CTL_GET_FAN_CNCT, 0, 0);
 	if (ret)
 		goto exit;
 
-	mode = ccp->buffer[channel + 1];
+	for (channel = 0; channel < 6; channel++) {
+		mode = ccp->buffer[channel + 1];
 
-	switch (mode) {
-	case 0:
-		scnprintf(ccp->fan_label[channel], LABEL_LENGTH, "fan%d nc", channel + 1);
-		break;
-	case 1:
-		scnprintf(ccp->fan_label[channel], LABEL_LENGTH, "fan%d 3pin", channel + 1);
-		break;
-	case 2:
-		scnprintf(ccp->fan_label[channel], LABEL_LENGTH, "fan%d 4pin", channel + 1);
-		break;
-	default:
-		scnprintf(ccp->fan_label[channel], LABEL_LENGTH, "fan%d other", channel + 1);
-		break;
+		switch (mode) {
+		case 0:
+			scnprintf(ccp->fan_label[channel], LABEL_LENGTH,
+				  "fan%d nc", channel + 1);
+			break;
+		case 1:
+			scnprintf(ccp->fan_label[channel], LABEL_LENGTH,
+				  "fan%d 3pin", channel + 1);
+			break;
+		case 2:
+			scnprintf(ccp->fan_label[channel], LABEL_LENGTH,
+				  "fan%d 4pin", channel + 1);
+			break;
+		default:
+			scnprintf(ccp->fan_label[channel], LABEL_LENGTH,
+				  "fan%d other", channel + 1);
+			break;
+		}
 	}
 
 exit:
@@ -146,12 +191,41 @@ exit:
 	return ret;
 }
 
-static int get_voltages(struct ccp_device *ccp, int channel, long *val)
+/* read temp sensor connection status and set labels */
+static int get_temp_cnct(struct ccp_device *ccp)
 {
+	int channel;
+	int mode;
 	int ret;
 
-	ret = get_data(ccp, CTL_GET_VOLT, channel, val);
+	mutex_lock(&ccp->mutex);
 
+	ret = send_usb_cmd(ccp, CTL_GET_TMP_CNCT, 0, 0);
+	if (ret)
+		goto exit;
+
+	for (channel = 0; channel < 4; channel++) {
+		mode = ccp->buffer[channel + 1];
+		ccp->temp_cnct[channel] = mode;
+
+		switch (mode) {
+		case 0:
+			scnprintf(ccp->temp_label[channel], LABEL_LENGTH,
+				  "temp%d nc", channel + 1);
+			break;
+		case 1:
+			scnprintf(ccp->temp_label[channel], LABEL_LENGTH,
+				  "temp%d", channel + 1);
+			break;
+		default:
+			scnprintf(ccp->temp_label[channel], LABEL_LENGTH,
+				  "temp%d other", channel + 1);
+			break;
+		}
+	}
+
+exit:
+	mutex_unlock(&ccp->mutex);
 	return ret;
 }
 
@@ -159,20 +233,11 @@ static int get_temp(struct ccp_device *ccp, int channel, long *val)
 {
 	int ret;
 
-	ret = get_data(ccp, CTL_GET_TMP, channel, val);
-	*val = *val * 10;
-
-	return ret;
-}
-
-static int get_rpm(struct ccp_device *ccp, int channel, long *val)
-{
-	int ret;
-
-	if (!ccp->fan_enable[channel])
+	if (ccp->temp_cnct[channel] != 1)
 		return -ENODATA;
 
-	ret = get_data(ccp, CTL_GET_FAN_RPM, channel, val);
+	ret = get_data(ccp, CTL_GET_TMP, channel, val);
+	*val = *val * 10;
 
 	return ret;
 }
@@ -180,15 +245,24 @@ static int get_rpm(struct ccp_device *ccp, int channel, long *val)
 static int ccp_read_string(struct device *dev, enum hwmon_sensor_types type,
 			   u32 attr, int channel, const char **str)
 {
-	int ret;
 	struct ccp_device *ccp = dev_get_drvdata(dev);
+	int ret = 0;
 
 	switch (type) {
 	case hwmon_fan:
 		switch (attr) {
 		case hwmon_fan_label:
-			ret = get_fan_mode_label(ccp, channel);
 			*str = ccp->fan_label[channel];
+			break;
+		default:
+			ret = -EOPNOTSUPP;
+			break;
+		}
+		break;
+	case hwmon_temp:
+		switch (attr) {
+		case hwmon_temp_label:
+			*str = ccp->temp_label[channel];
 			break;
 		default:
 			ret = -EOPNOTSUPP;
@@ -206,8 +280,8 @@ static int ccp_read_string(struct device *dev, enum hwmon_sensor_types type,
 static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 		    u32 attr, int channel, long *val)
 {
-	int ret = 0;
 	struct ccp_device *ccp = dev_get_drvdata(dev);
+	int ret = 0;
 
 	switch (type) {
 	case hwmon_temp:
@@ -223,10 +297,7 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 	case hwmon_fan:
 		switch (attr) {
 		case hwmon_fan_input:
-			ret = get_rpm(ccp, channel, val);
-			break;
-		case hwmon_fan_enable:
-			*val = ccp->fan_enable[channel];
+			ret = get_data(ccp, CTL_GET_FAN_RPM, channel, val);
 			break;
 		default:
 			ret = -EOPNOTSUPP;
@@ -236,8 +307,8 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 	case hwmon_pwm:
 		switch (attr) {
 		case hwmon_pwm_input:
-			/* how to read pwm values from the device is unknown */
-			/* driver returns last set value or 0		     */
+			/* how to read pwm values from the device is currently unknown */
+			/* driver returns last set value or 0		               */
 			*val = ccp->pwm[channel];
 			break;
 		default:
@@ -248,7 +319,7 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 	case hwmon_in:
 		switch (attr) {
 		case hwmon_in_input:
-			ret = get_voltages(ccp, channel, val);
+			ret = get_data(ccp, CTL_GET_VOLT, channel, val);
 			break;
 		default:
 			ret = -EOPNOTSUPP;
@@ -266,23 +337,10 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 static int ccp_write(struct device *dev, enum hwmon_sensor_types type,
 		     u32 attr, int channel, long val)
 {
-	int ret = 0;
 	struct ccp_device *ccp = dev_get_drvdata(dev);
+	int ret = 0;
 
 	switch (type) {
-	case hwmon_fan:
-		switch (attr) {
-		case hwmon_fan_enable:
-			if (val == 0 || val == 1)
-				ccp->fan_enable[channel] = val;
-			else
-				ret = -EINVAL;
-			break;
-		default:
-			ret = -EOPNOTSUPP;
-			break;
-		}
-		break;
 	case hwmon_pwm:
 		switch (attr) {
 		case hwmon_pwm_input:
@@ -305,17 +363,11 @@ static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
 			      u32 attr, int channel)
 {
 	switch (type) {
-	case hwmon_chip:
-		switch (attr) {
-		case hwmon_chip_update_interval:
-			return 0644;
-		default:
-			break;
-		}
-		break;
 	case hwmon_temp:
 		switch (attr) {
 		case hwmon_temp_input:
+			return 0444;
+		case hwmon_temp_label:
 			return 0444;
 		default:
 			break;
@@ -327,8 +379,6 @@ static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
 			return 0444;
 		case hwmon_fan_label:
 			return 0444;
-		case hwmon_fan_enable:
-			return 0644;
 		default:
 			break;
 		}
@@ -359,26 +409,26 @@ static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
 static const struct hwmon_ops ccp_hwmon_ops = {
 	.is_visible = ccp_is_visible,
 	.read = ccp_read,
-	.write = ccp_write,
 	.read_string = ccp_read_string,
+	.write = ccp_write,
 };
 
 static const struct hwmon_channel_info *ccp_info[] = {
 	HWMON_CHANNEL_INFO(chip,
-			   HWMON_C_REGISTER_TZ | HWMON_C_UPDATE_INTERVAL),
+			   HWMON_C_REGISTER_TZ),
 	HWMON_CHANNEL_INFO(temp,
-			   HWMON_T_INPUT | HWMON_T_MAX,
-			   HWMON_T_INPUT | HWMON_T_MAX,
-			   HWMON_T_INPUT | HWMON_T_MAX,
-			   HWMON_T_INPUT | HWMON_T_MAX
+			   HWMON_T_INPUT | HWMON_T_LABEL,
+			   HWMON_T_INPUT | HWMON_T_LABEL,
+			   HWMON_T_INPUT | HWMON_T_LABEL,
+			   HWMON_T_INPUT | HWMON_T_LABEL
 			   ),
 	HWMON_CHANNEL_INFO(fan,
-			   HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
-			   HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
-			   HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
-			   HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
-			   HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL,
-			   HWMON_F_INPUT | HWMON_F_ENABLE | HWMON_F_LABEL
+			   HWMON_F_INPUT | HWMON_F_LABEL,
+			   HWMON_F_INPUT | HWMON_F_LABEL,
+			   HWMON_F_INPUT | HWMON_F_LABEL,
+			   HWMON_F_INPUT | HWMON_F_LABEL,
+			   HWMON_F_INPUT | HWMON_F_LABEL,
+			   HWMON_F_INPUT | HWMON_F_LABEL
 			   ),
 	HWMON_CHANNEL_INFO(pwm,
 			   HWMON_PWM_INPUT,
@@ -403,8 +453,17 @@ static const struct hwmon_chip_info ccp_chip_info = {
 
 static int ccp_probe(struct usb_interface *intf, const struct usb_device_id *id)
 {
-	struct ccp_device *ccp;
 	struct device *hwmon_dev;
+<<<<<<< HEAD
+	struct ccp_device *ccp;
+	int ret;
+
+	ccp = devm_kzalloc(&intf->dev, sizeof(struct ccp_device), GFP_KERNEL);
+	if (!ccp)
+		return -ENOMEM;
+
+	ccp->buffer = devm_kmalloc(&intf->dev, OUT_BUFFER_SIZE, GFP_KERNEL);
+=======
 	struct usb_device *udev = interface_to_usbdev(intf);
 
 	ccp = devm_kzalloc(&udev->dev, sizeof(struct ccp_device), GFP_KERNEL);
@@ -412,11 +471,26 @@ static int ccp_probe(struct usb_interface *intf, const struct usb_device_id *id)
 		return -ENOMEM;
 
 	ccp->buffer = devm_kmalloc(&udev->dev, OUT_BUFFER_SIZE, GFP_KERNEL);
+>>>>>>> 0af2a15... usb branch
 	if (!ccp->buffer)
 		return -ENOMEM;
 
 	mutex_init(&ccp->mutex);
 
+<<<<<<< HEAD
+	ccp->udev = interface_to_usbdev(intf);
+
+	/* temp and fan connection status only updates, when device is powered on */
+	ret = get_temp_cnct(ccp);
+	if (ret)
+		return ret;
+
+	ret = get_fan_cnct(ccp);
+	if (ret)
+		return ret;
+
+	hwmon_dev = devm_hwmon_device_register_with_info(&intf->dev, "corsaircpro", ccp,
+=======
 	ccp->fan_enable[0] = 1;
 	ccp->fan_enable[1] = 1;
 	ccp->fan_enable[2] = 1;
@@ -426,23 +500,35 @@ static int ccp_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	ccp->udev = udev;
 
 	hwmon_dev = devm_hwmon_device_register_with_info(&udev->dev, "corsaircpro", ccp,
+>>>>>>> 0af2a15... usb branch
 							 &ccp_chip_info, 0);
 
 	return PTR_ERR_OR_ZERO(hwmon_dev);
 }
 
+<<<<<<< HEAD
+static void ccp_disconnect(struct usb_interface *intf)
+{
+}
+
+static const struct usb_device_id ccp_devices[] = {
+	{ USB_DEVICE(USB_VENDOR_ID_CORSAIR, USB_PRODUCT_ID_CORSAIR_COMMANDERPRO) },
+	{ USB_DEVICE(USB_VENDOR_ID_CORSAIR, USB_PRODUCT_ID_CORSAIR_1000D) },
+=======
 static const struct usb_device_id ccp_devices[] = {
 	{ USB_DEVICE(USB_VENDOR_ID_CORSAIR,
 			 USB_PRODUCT_ID_CORSAIR_COMMANDERPRO) },
 	{ USB_DEVICE(USB_VENDOR_ID_CORSAIR,
 			 USB_PRODUCT_ID_CORSAIR_1000D) },
+>>>>>>> 0af2a15... usb branch
 	{ }
 };
 
 static struct usb_driver ccp_driver = {
 	.name = "corsair-cpro",
-	.id_table = ccp_devices,
-	.probe = ccp_probe
+	.probe = ccp_probe,
+	.disconnect = ccp_disconnect,
+	.id_table = ccp_devices
 };
 
 MODULE_DEVICE_TABLE(usb, ccp_devices);

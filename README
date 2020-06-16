@@ -8,6 +8,8 @@ Read voltage values.
 
 
 If you would like to test it, clone the repository.
+For the usb version:
+echo x > sys/bus/usb/drivers/usbhid/unbind where x = usb bus address as linked in sys/bus/usb/drivers/usbhid
 make && sudo insmod corsair-cpro.ko
 
 If you run sensors, it should show up.
