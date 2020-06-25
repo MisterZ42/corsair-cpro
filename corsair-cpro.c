@@ -4,11 +4,13 @@
  * Copyright (C) 2020 Marius Zachmann <mail@mariuszachmann.de>
  */
 
+#include <linux/bitops.h>
 #include <linux/kernel.h>
 #include <linux/hwmon.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
+#include <linux/types.h>
 #include <linux/usb.h>
 
 #define USB_VENDOR_ID_CORSAIR			0x1b1c
@@ -61,8 +63,6 @@ struct ccp_device {
 	DECLARE_BITMAP(temp_cnct, NUM_TEMP_SENSORS);
 	DECLARE_BITMAP(fan_cnct, NUM_FANS);
 	char fan_label[6][LABEL_LENGTH];
-	int temp_cnct[4];
-	char temp_label[4][LABEL_LENGTH];
 };
 
 /* send command, check for error in response, response in ccp->buffer */
@@ -138,7 +138,6 @@ static int ccp_read_string(struct device *dev, enum hwmon_sensor_types type,
 			   u32 attr, int channel, const char **str)
 {
 	struct ccp_device *ccp = dev_get_drvdata(dev);
-	int ret = 0;
 
 	switch (type) {
 	case hwmon_fan:
@@ -147,16 +146,6 @@ static int ccp_read_string(struct device *dev, enum hwmon_sensor_types type,
 			*str = ccp->fan_label[channel];
 			return 0;
 		default:
-			break;
-		}
-		break;
-	case hwmon_temp:
-		switch (attr) {
-		case hwmon_temp_label:
-			*str = ccp->temp_label[channel];
-			break;
-		default:
-			ret = -EOPNOTSUPP;
 			break;
 		}
 		break;
@@ -232,7 +221,6 @@ static int ccp_write(struct device *dev, enum hwmon_sensor_types type,
 		     u32 attr, int channel, long val)
 {
 	struct ccp_device *ccp = dev_get_drvdata(dev);
-	int ret = 0;
 
 	switch (type) {
 	case hwmon_pwm:
@@ -258,7 +246,7 @@ static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
 	switch (type) {
 	case hwmon_temp:
 		if (!test_bit(channel, ccp->temp_cnct))
-			return 0;
+			break;
 
 		switch (attr) {
 		case hwmon_temp_input:
@@ -271,7 +259,7 @@ static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
 		break;
 	case hwmon_fan:
 		if (!test_bit(channel, ccp->fan_cnct))
-			return 0;
+			break;
 
 		switch (attr) {
 		case hwmon_fan_input:
@@ -284,7 +272,7 @@ static umode_t ccp_is_visible(const void *data, enum hwmon_sensor_types type,
 		break;
 	case hwmon_pwm:
 		if (!test_bit(channel, ccp->fan_cnct))
-			return 0;
+			break;
 
 		switch (attr) {
 		case hwmon_pwm_input:
