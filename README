@@ -3,7 +3,8 @@ This is a kernel driver for the Corsair Commander Pro.
 Features:
 Recognize connected fans, read fan speeds.
 Read connected thermal sensors.
-Set fan speed with single pwm value.
+Set and read fan speed with single pwm value.
+Set fan speed with target value.
 Read voltage values.
 
 
@@ -17,6 +18,7 @@ If you run sensors, it should show up.
 Features in /sys/class/hwmon/hwmon*
 fan*_label shows the number and the connection status.
 fan*_input shows the fan speed.
+fan*_target sets target RPM values.
 pwm* is writable and takes numbers from 0-255.
 temp*_input shows the tempature.
 in0_label voltage on 12v rail
