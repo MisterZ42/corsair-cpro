@@ -2,6 +2,10 @@
 /*
  * corsair-cpro.c - Linux driver for Corsair Commander Pro
  * Copyright (C) 2020 Marius Zachmann <mail@mariuszachmann.de>
+ *
+ * This driver uses hid reports to communicate with the device to allow hidraw userspace drivers
+ * still being used. The device does not use report ids. When using hidraw and this driver
+ * simultaniously, reports could be switched.
  */
 
 #include <linux/bitops.h>
@@ -21,6 +25,7 @@
 #define OUT_BUFFER_SIZE		63
 #define IN_BUFFER_SIZE		16
 #define LABEL_LENGTH		11
+#define REQ_TIMEOUT		300
 
 #define CTL_GET_TMP_CNCT	0x10	/*
 					 * returns in bytes 1-4 for each temp sensor:
@@ -64,6 +69,7 @@
 
 struct ccp_device {
 	struct hid_device *hdev;
+	struct device *hwmon_dev;
 	struct completion wait_input_report;
 	struct mutex mutex; /* whenever buffer is used, lock before send_usb_cmd */
 	u8 *buffer;
@@ -92,7 +98,7 @@ static int send_usb_cmd(struct ccp_device *ccp, u8 command, u8 byte1, u8 byte2, 
 	if (ret < 0)
 		return ret;
 
-	t = wait_for_completion_timeout(&ccp->wait_input_report, msecs_to_jiffies(300));
+	t = wait_for_completion_timeout(&ccp->wait_input_report, msecs_to_jiffies(REQ_TIMEOUT));
 	if (!t)
 		return -ETIMEDOUT;
 
@@ -454,7 +460,6 @@ static int get_temp_cnct(struct ccp_device *ccp)
 
 static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 {
-	struct device *hwmon_dev;
 	struct ccp_device *ccp;
 	int ret;
 
@@ -493,10 +498,10 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	ret = get_fan_cnct(ccp);
 	if (ret)
 		goto out_hw_close;
-	hwmon_dev = devm_hwmon_device_register_with_info(&hdev->dev, "corsaircpro", ccp,
-							 &ccp_chip_info, 0);
-	if (IS_ERR(hwmon_dev)) {
-		ret = PTR_ERR(hwmon_dev);
+	ccp->hwmon_dev = hwmon_device_register_with_info(&hdev->dev, "corsaircpro",
+							 ccp, &ccp_chip_info, 0);
+	if (IS_ERR(ccp->hwmon_dev)) {
+		ret = PTR_ERR(ccp->hwmon_dev);
 		goto out_hw_close;
 	}
 
@@ -511,6 +516,9 @@ out_hw_stop:
 
 static void ccp_remove(struct hid_device *hdev)
 {
+	struct ccp_device *ccp = hid_get_drvdata(hdev);
+
+	hwmon_device_unregister(ccp->hwmon_dev);
 	hid_hw_close(hdev);
 	hid_hw_stop(hdev);
 }
@@ -542,6 +550,9 @@ static void __exit ccp_exit(void)
 	hid_unregister_driver(&ccp_driver);
 }
 
-/* make sure, it is loaded after hid */
+/*
+ * When compiling this driver as built-in, hwmon initcalls will get called before the
+ * hid driver and this driver would fail to register. late_initcall solves this.
+ */
 late_initcall(ccp_init);
 module_exit(ccp_exit);
