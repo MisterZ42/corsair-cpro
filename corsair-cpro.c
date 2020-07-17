@@ -12,6 +12,7 @@
 #include <linux/completion.h>
 #include <linux/hid.h>
 #include <linux/hwmon.h>
+#include <linux/hwmon-sysfs.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -66,6 +67,7 @@
 
 #define NUM_FANS		6
 #define NUM_TEMP_SENSORS	4
+#define NUM_AUTO_POINTS		6
 
 struct ccp_device {
 	struct hid_device *hdev;
@@ -361,6 +363,72 @@ static const struct hwmon_ops ccp_hwmon_ops = {
 	.write = ccp_write,
 };
 
+static ssize_t auto_point_show(struct device *dev, struct device_attribute *dev_attr, char *buf)
+{
+	struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(dev_attr);
+
+	printk(KERN_ALERT "nr: %d index: %d\n", attr->nr, attr->index);
+
+	return 0;
+}
+
+static ssize_t auto_point_store(struct device *dev, struct device_attribute *dev_attr,
+				const char *buf, size_t count)
+{
+	struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(dev_attr);
+
+	printk(KERN_ALERT "nr: %d index: %d\n", attr->nr, attr->index);
+
+	return 0;
+}
+
+
+//static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point1_pwm, auto_point, 0, 0);
+static struct sensor_device_attribute_2 sensor_dev_attr_pwm1_auto_point1_pwm = {
+	.dev_attr = __ATTR(pwm1_auto_point1_pwm, 0644, auto_point_show, auto_point_store),
+	.index = 0,
+	.nr = 0,
+};
+static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point2_pwm, auto_point, 0, 1);
+static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point3_pwm, auto_point, 0, 2);
+static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point4_pwm, auto_point, 0, 3);
+static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point5_pwm, auto_point, 0, 4);
+static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point6_pwm, auto_point, 0, 5);
+static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point1_temp, auto_point, 0, NUM_AUTO_POINTS + 0);
+static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point2_temp, auto_point, 0, NUM_AUTO_POINTS + 1);
+static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point3_temp, auto_point, 0, NUM_AUTO_POINTS + 2);
+static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point4_temp, auto_point, 0, NUM_AUTO_POINTS + 3);
+static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point5_temp, auto_point, 0, NUM_AUTO_POINTS + 4);
+static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point6_temp, auto_point, 0, NUM_AUTO_POINTS + 5);
+static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_channels_temp, auto_point, 0, NUM_AUTO_POINTS * 2);
+
+static struct attribute *ccp_auto_point_attrs[] = {
+	&sensor_dev_attr_pwm1_auto_point1_pwm.dev_attr.attr,
+	&sensor_dev_attr_pwm1_auto_point2_pwm.dev_attr.attr,
+	&sensor_dev_attr_pwm1_auto_point3_pwm.dev_attr.attr,
+	&sensor_dev_attr_pwm1_auto_point4_pwm.dev_attr.attr,
+	&sensor_dev_attr_pwm1_auto_point5_pwm.dev_attr.attr,
+	&sensor_dev_attr_pwm1_auto_point6_pwm.dev_attr.attr,
+	&sensor_dev_attr_pwm1_auto_point1_temp.dev_attr.attr,
+	&sensor_dev_attr_pwm1_auto_point2_temp.dev_attr.attr,
+	&sensor_dev_attr_pwm1_auto_point3_temp.dev_attr.attr,
+	&sensor_dev_attr_pwm1_auto_point4_temp.dev_attr.attr,
+	&sensor_dev_attr_pwm1_auto_point5_temp.dev_attr.attr,
+	&sensor_dev_attr_pwm1_auto_point6_temp.dev_attr.attr,
+	&sensor_dev_attr_pwm1_auto_channels_temp.dev_attr.attr,
+};
+
+static const struct attribute_group ccp_auto_point_group = {
+	.attrs = ccp_auto_point_attrs,
+};
+
+static const struct attribute_group *ccp_auto_point_groups[] = {
+	&ccp_auto_point_group,
+	0,
+};
+
+//ATTRIBUTE_GROUPS(ccp_auto_point);
+
 static const struct hwmon_channel_info *ccp_info[] = {
 	HWMON_CHANNEL_INFO(chip,
 			   HWMON_C_REGISTER_TZ),
@@ -498,8 +566,8 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	ret = get_fan_cnct(ccp);
 	if (ret)
 		goto out_hw_close;
-	ccp->hwmon_dev = hwmon_device_register_with_info(&hdev->dev, "corsaircpro",
-							 ccp, &ccp_chip_info, 0);
+	ccp->hwmon_dev = hwmon_device_register_with_info(&hdev->dev, "corsaircpro", ccp,
+							 &ccp_chip_info, ccp_auto_point_groups);
 	if (IS_ERR(ccp->hwmon_dev)) {
 		ret = PTR_ERR(ccp->hwmon_dev);
 		goto out_hw_close;
