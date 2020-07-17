@@ -7,10 +7,7 @@ Set and read fan speed with single pwm value.
 Set fan speed with target value.
 Read voltage values.
 
-
 If you would like to test it, clone the repository.
-For the usb version:
-echo x > sys/bus/usb/drivers/usbhid/unbind where x = usb bus address as linked in sys/bus/usb/drivers/usbhid
 make && sudo insmod corsair-cpro.ko
 
 If you run sensors, it should show up.
@@ -19,8 +16,8 @@ Features in /sys/class/hwmon/hwmon*
 fan*_label shows the number and the connection status.
 fan*_input shows the fan speed.
 fan*_target sets target RPM values.
-pwm* is writable and takes numbers from 0-255.
-temp*_input shows the tempature.
+pwm* is takes numbers from 0-255.
+temp*_input shows the temperature.
 in0_label voltage on 12v rail
 in1_label voltage on 5v rail
 in2_label voltage on 3.3v rail
