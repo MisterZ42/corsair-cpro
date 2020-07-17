@@ -37,11 +37,12 @@
 					 * send: byte 1 is channel, rest zero
 					 * rcv:  returns temp for channel in centi-degree celsius
 					 * in bytes 1 and 2
-					 * returns 17 in byte 0 if no sensor is connected
+					 * returns 0x11 in byte 0 if no sensor is connected
 					 */
 #define CTL_GET_VOLT		0x12	/*
 					 * send: byte 1 is rail number: 0 = 12v, 1 = 5v, 2 = 3.3v
 					 * rcv:  returns millivolt in bytes 1,2
+					 * returns error 0x10 if request is invalid
 					 */
 #define CTL_GET_FAN_CNCT	0x20	/*
 					 * returns in bytes 1-6 for each fan:
@@ -52,6 +53,12 @@
 #define CTL_GET_FAN_RPM		0x21	/*
 					 * send: byte 1 is channel, rest zero
 					 * rcv:  returns rpm in bytes 1,2
+					 */
+#define CTL_GET_FAN_PWM		0x22	/*
+					 * send: byte 1 is channel, rest zero
+					 * rcv:  returns pwm in byte 1 if it was set
+					 *	 returns error 0x12 if fan is controlled via
+					 *	 fan_target or fan curve
 					 */
 #define CTL_SET_FAN_FPWM	0x23	/*
 					 * set fixed pwm
@@ -67,7 +74,6 @@
 
 #define NUM_FANS		6
 #define NUM_TEMP_SENSORS	4
-#define NUM_AUTO_POINTS		6
 
 struct ccp_device {
 	struct hid_device *hdev;
@@ -75,7 +81,6 @@ struct ccp_device {
 	struct completion wait_input_report;
 	struct mutex mutex; /* whenever buffer is used, lock before send_usb_cmd */
 	u8 *buffer;
-	int pwm[6];
 	int target[6];
 	DECLARE_BITMAP(temp_cnct, NUM_TEMP_SENSORS);
 	DECLARE_BITMAP(fan_cnct, NUM_FANS);
@@ -105,12 +110,20 @@ static int send_usb_cmd(struct ccp_device *ccp, u8 command, u8 byte1, u8 byte2, 
 		return -ETIMEDOUT;
 
 	/* first byte of response is error code */
-	if (ccp->buffer[0] != 0x00) {
+	switch (ccp->buffer[0]) {
+	case 0x00: /* success */
+		return 0;
+	case 0x01: /* called invalid command */
+		return -EOPNOTSUPP;
+	case 0x10: /* called GET_VOLT / GET_TMP with invalid arguments */
+		return -EINVAL;
+	case 0x11: /* requested temps of disconnected sensors */
+	case 0x12: /* requested pwm of not pwm controlled channels */
+		return -ENODATA;
+	default:
 		hid_dbg(ccp->hdev, "device response error: %d", ccp->buffer[0]);
 		return -EIO;
 	}
-
-	return 0;
 }
 
 static int ccp_raw_event(struct hid_device *hdev, struct hid_report *report, u8 *data, int size)
@@ -128,7 +141,7 @@ static int ccp_raw_event(struct hid_device *hdev, struct hid_report *report, u8 
 }
 
 /* requests and returns single data values depending on channel */
-static int get_data(struct ccp_device *ccp, int command, int channel)
+static int get_data(struct ccp_device *ccp, int command, int channel, int two_byte_data)
 {
 	int ret;
 
@@ -138,7 +151,10 @@ static int get_data(struct ccp_device *ccp, int command, int channel)
 	if (ret)
 		goto out_unlock;
 
-	ret = (ccp->buffer[1] << 8) + ccp->buffer[2];
+	if (two_byte_data)
+		ret = (ccp->buffer[1] << 8) + ccp->buffer[2];
+	else
+		ret = ccp->buffer[1];
 
 out_unlock:
 	mutex_unlock(&ccp->mutex);
@@ -151,8 +167,6 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
 
 	if (val < 0 || val > 255)
 		return -EINVAL;
-
-	ccp->pwm[channel] = val;
 
 	/* The Corsair Commander Pro uses values from 0-100 */
 	val = DIV_ROUND_CLOSEST(val * 100, 255);
@@ -173,7 +187,6 @@ static int set_target(struct ccp_device *ccp, int channel, long val)
 	ccp->target[channel] = val;
 
 	mutex_lock(&ccp->mutex);
-
 	ret = send_usb_cmd(ccp, CTL_SET_FAN_TARGET, channel, val >> 8, val);
 
 	mutex_unlock(&ccp->mutex);
@@ -212,7 +225,7 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 	case hwmon_temp:
 		switch (attr) {
 		case hwmon_temp_input:
-			ret = get_data(ccp, CTL_GET_TMP, channel);
+			ret = get_data(ccp, CTL_GET_TMP, channel, 1);
 			if (ret < 0)
 				return ret;
 			*val = ret * 10;
@@ -224,7 +237,7 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 	case hwmon_fan:
 		switch (attr) {
 		case hwmon_fan_input:
-			ret = get_data(ccp, CTL_GET_FAN_RPM, channel);
+			ret = get_data(ccp, CTL_GET_FAN_RPM, channel, 1);
 			if (ret < 0)
 				return ret;
 			*val = ret;
@@ -241,9 +254,10 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 	case hwmon_pwm:
 		switch (attr) {
 		case hwmon_pwm_input:
-			/* how to read pwm values from the device is currently unknown */
-			/* driver returns last set value or 0		               */
-			*val = ccp->pwm[channel];
+			ret = get_data(ccp, CTL_GET_FAN_PWM, channel, 0);
+			if (ret < 0)
+				return ret;
+			*val = DIV_ROUND_CLOSEST(ret * 255, 100);
 			return 0;
 		default:
 			break;
@@ -252,7 +266,7 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 	case hwmon_in:
 		switch (attr) {
 		case hwmon_in_input:
-			ret = get_data(ccp, CTL_GET_VOLT, channel);
+			ret = get_data(ccp, CTL_GET_VOLT, channel, 1);
 			if (ret < 0)
 				return ret;
 			*val = ret;
@@ -362,72 +376,6 @@ static const struct hwmon_ops ccp_hwmon_ops = {
 	.read_string = ccp_read_string,
 	.write = ccp_write,
 };
-
-static ssize_t auto_point_show(struct device *dev, struct device_attribute *dev_attr, char *buf)
-{
-	struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(dev_attr);
-
-	printk(KERN_ALERT "nr: %d index: %d\n", attr->nr, attr->index);
-
-	return 0;
-}
-
-static ssize_t auto_point_store(struct device *dev, struct device_attribute *dev_attr,
-				const char *buf, size_t count)
-{
-	struct sensor_device_attribute_2 *attr = to_sensor_dev_attr_2(dev_attr);
-
-	printk(KERN_ALERT "nr: %d index: %d\n", attr->nr, attr->index);
-
-	return 0;
-}
-
-
-//static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point1_pwm, auto_point, 0, 0);
-static struct sensor_device_attribute_2 sensor_dev_attr_pwm1_auto_point1_pwm = {
-	.dev_attr = __ATTR(pwm1_auto_point1_pwm, 0644, auto_point_show, auto_point_store),
-	.index = 0,
-	.nr = 0,
-};
-static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point2_pwm, auto_point, 0, 1);
-static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point3_pwm, auto_point, 0, 2);
-static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point4_pwm, auto_point, 0, 3);
-static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point5_pwm, auto_point, 0, 4);
-static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point6_pwm, auto_point, 0, 5);
-static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point1_temp, auto_point, 0, NUM_AUTO_POINTS + 0);
-static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point2_temp, auto_point, 0, NUM_AUTO_POINTS + 1);
-static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point3_temp, auto_point, 0, NUM_AUTO_POINTS + 2);
-static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point4_temp, auto_point, 0, NUM_AUTO_POINTS + 3);
-static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point5_temp, auto_point, 0, NUM_AUTO_POINTS + 4);
-static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_point6_temp, auto_point, 0, NUM_AUTO_POINTS + 5);
-static SENSOR_DEVICE_ATTR_2_RW(pwm1_auto_channels_temp, auto_point, 0, NUM_AUTO_POINTS * 2);
-
-static struct attribute *ccp_auto_point_attrs[] = {
-	&sensor_dev_attr_pwm1_auto_point1_pwm.dev_attr.attr,
-	&sensor_dev_attr_pwm1_auto_point2_pwm.dev_attr.attr,
-	&sensor_dev_attr_pwm1_auto_point3_pwm.dev_attr.attr,
-	&sensor_dev_attr_pwm1_auto_point4_pwm.dev_attr.attr,
-	&sensor_dev_attr_pwm1_auto_point5_pwm.dev_attr.attr,
-	&sensor_dev_attr_pwm1_auto_point6_pwm.dev_attr.attr,
-	&sensor_dev_attr_pwm1_auto_point1_temp.dev_attr.attr,
-	&sensor_dev_attr_pwm1_auto_point2_temp.dev_attr.attr,
-	&sensor_dev_attr_pwm1_auto_point3_temp.dev_attr.attr,
-	&sensor_dev_attr_pwm1_auto_point4_temp.dev_attr.attr,
-	&sensor_dev_attr_pwm1_auto_point5_temp.dev_attr.attr,
-	&sensor_dev_attr_pwm1_auto_point6_temp.dev_attr.attr,
-	&sensor_dev_attr_pwm1_auto_channels_temp.dev_attr.attr,
-};
-
-static const struct attribute_group ccp_auto_point_group = {
-	.attrs = ccp_auto_point_attrs,
-};
-
-static const struct attribute_group *ccp_auto_point_groups[] = {
-	&ccp_auto_point_group,
-	0,
-};
-
-//ATTRIBUTE_GROUPS(ccp_auto_point);
 
 static const struct hwmon_channel_info *ccp_info[] = {
 	HWMON_CHANNEL_INFO(chip,
@@ -567,7 +515,7 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	if (ret)
 		goto out_hw_close;
 	ccp->hwmon_dev = hwmon_device_register_with_info(&hdev->dev, "corsaircpro", ccp,
-							 &ccp_chip_info, ccp_auto_point_groups);
+							 &ccp_chip_info, 0);
 	if (IS_ERR(ccp->hwmon_dev)) {
 		ret = PTR_ERR(ccp->hwmon_dev);
 		goto out_hw_close;
@@ -599,7 +547,7 @@ static const struct hid_device_id ccp_devices[] = {
 
 static struct hid_driver ccp_driver = {
 	.name = "corsair-cpro",
-	.id_table = ccp_devices,
+	.id_table = ccp_devices,	
 	.probe = ccp_probe,
 	.remove = ccp_remove,
 	.raw_event = ccp_raw_event,
