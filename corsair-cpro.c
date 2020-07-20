@@ -87,6 +87,25 @@ struct ccp_device {
 	char fan_label[6][LABEL_LENGTH];
 };
 
+/* converts response error in buffer to errno */
+static int ccp_get_errno(struct ccp_device *ccp)
+{
+	switch (ccp->buffer[0]) {
+	case 0x00: /* success */
+		return 0;
+	case 0x01: /* called invalid command */
+		return -EOPNOTSUPP;
+	case 0x10: /* called GET_VOLT / GET_TMP with invalid arguments */
+		return -EINVAL;
+	case 0x11: /* requested temps of disconnected sensors */
+	case 0x12: /* requested pwm of not pwm controlled channels */
+		return -ENODATA;
+	default:
+		hid_dbg(ccp->hdev, "device response error: %d", ccp->buffer[0]);
+		return -EIO;
+	}
+}
+
 /* send command, check for error in response, response in ccp->buffer */
 static int send_usb_cmd(struct ccp_device *ccp, u8 command, u8 byte1, u8 byte2, u8 byte3)
 {
@@ -109,21 +128,7 @@ static int send_usb_cmd(struct ccp_device *ccp, u8 command, u8 byte1, u8 byte2, 
 	if (!t)
 		return -ETIMEDOUT;
 
-	/* first byte of response is error code */
-	switch (ccp->buffer[0]) {
-	case 0x00: /* success */
-		return 0;
-	case 0x01: /* called invalid command */
-		return -EOPNOTSUPP;
-	case 0x10: /* called GET_VOLT / GET_TMP with invalid arguments */
-		return -EINVAL;
-	case 0x11: /* requested temps of disconnected sensors */
-	case 0x12: /* requested pwm of not pwm controlled channels */
-		return -ENODATA;
-	default:
-		hid_dbg(ccp->hdev, "device response error: %d", ccp->buffer[0]);
-		return -EIO;
-	}
+	return ccp_get_errno(ccp);
 }
 
 static int ccp_raw_event(struct hid_device *hdev, struct hid_report *report, u8 *data, int size)
@@ -141,7 +146,7 @@ static int ccp_raw_event(struct hid_device *hdev, struct hid_report *report, u8 
 }
 
 /* requests and returns single data values depending on channel */
-static int get_data(struct ccp_device *ccp, int command, int channel, int two_byte_data)
+static int get_data(struct ccp_device *ccp, int command, int channel, bool two_byte_data)
 {
 	int ret;
 
@@ -174,6 +179,8 @@ static int set_pwm(struct ccp_device *ccp, int channel, long val)
 	mutex_lock(&ccp->mutex);
 
 	ret = send_usb_cmd(ccp, CTL_SET_FAN_FPWM, channel, val, 0);
+	if (!ret)
+		ccp->target[channel] = -ENODATA;
 
 	mutex_unlock(&ccp->mutex);
 	return ret;
@@ -225,7 +232,7 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 	case hwmon_temp:
 		switch (attr) {
 		case hwmon_temp_input:
-			ret = get_data(ccp, CTL_GET_TMP, channel, 1);
+			ret = get_data(ccp, CTL_GET_TMP, channel, true);
 			if (ret < 0)
 				return ret;
 			*val = ret * 10;
@@ -237,7 +244,7 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 	case hwmon_fan:
 		switch (attr) {
 		case hwmon_fan_input:
-			ret = get_data(ccp, CTL_GET_FAN_RPM, channel, 1);
+			ret = get_data(ccp, CTL_GET_FAN_RPM, channel, true);
 			if (ret < 0)
 				return ret;
 			*val = ret;
@@ -245,6 +252,8 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 		case hwmon_fan_target:
 			/* how to read target values from the device is unknown */
 			/* driver returns last set value or 0			*/
+			if (ccp->target[channel] < 0)
+				return -ENODATA;
 			*val = ccp->target[channel];
 			return 0;
 		default:
@@ -254,7 +263,7 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 	case hwmon_pwm:
 		switch (attr) {
 		case hwmon_pwm_input:
-			ret = get_data(ccp, CTL_GET_FAN_PWM, channel, 0);
+			ret = get_data(ccp, CTL_GET_FAN_PWM, channel, false);
 			if (ret < 0)
 				return ret;
 			*val = DIV_ROUND_CLOSEST(ret * 255, 100);
@@ -266,7 +275,7 @@ static int ccp_read(struct device *dev, enum hwmon_sensor_types type,
 	case hwmon_in:
 		switch (attr) {
 		case hwmon_in_input:
-			ret = get_data(ccp, CTL_GET_VOLT, channel, 1);
+			ret = get_data(ccp, CTL_GET_VOLT, channel, true);
 			if (ret < 0)
 				return ret;
 			*val = ret;
@@ -432,6 +441,7 @@ static int get_fan_cnct(struct ccp_device *ccp)
 			continue;
 
 		set_bit(channel, ccp->fan_cnct);
+		ccp->target[channel] = -ENODATA;
 
 		switch (mode) {
 		case 1:
@@ -547,7 +557,7 @@ static const struct hid_device_id ccp_devices[] = {
 
 static struct hid_driver ccp_driver = {
 	.name = "corsair-cpro",
-	.id_table = ccp_devices,	
+	.id_table = ccp_devices,
 	.probe = ccp_probe,
 	.remove = ccp_remove,
 	.raw_event = ccp_raw_event,
