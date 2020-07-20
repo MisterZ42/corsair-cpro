@@ -101,7 +101,7 @@ static int ccp_get_errno(struct ccp_device *ccp)
 	case 0x12: /* requested pwm of not pwm controlled channels */
 		return -ENODATA;
 	default:
-		hid_dbg(ccp->hdev, "device response error: %d", ccp->buffer[0]);
+		hid_dbg(ccp->hdev, "unknown device response error: %d", ccp->buffer[0]);
 		return -EIO;
 	}
 }
