@@ -156,10 +156,9 @@ static int get_data(struct ccp_device *ccp, int command, int channel, bool two_b
 	if (ret)
 		goto out_unlock;
 
+	ret = ccp->buffer[1];
 	if (two_byte_data)
-		ret = (ccp->buffer[1] << 8) + ccp->buffer[2];
-	else
-		ret = ccp->buffer[1];
+		ret = (ret << 8) + ccp->buffer[2];
 
 out_unlock:
 	mutex_unlock(&ccp->mutex);
