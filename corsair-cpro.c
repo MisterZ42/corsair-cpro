@@ -12,7 +12,6 @@
 #include <linux/completion.h>
 #include <linux/hid.h>
 #include <linux/hwmon.h>
-#include <linux/hwmon-sysfs.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -523,8 +522,8 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	ret = get_fan_cnct(ccp);
 	if (ret)
 		goto out_hw_close;
-	ccp->hwmon_dev = hwmon_device_register_with_info(&hdev->dev, "corsaircpro", ccp,
-							 &ccp_chip_info, 0);
+	ccp->hwmon_dev = hwmon_device_register_with_info(&hdev->dev, "corsaircpro",
+							 ccp, &ccp_chip_info, 0);
 	if (IS_ERR(ccp->hwmon_dev)) {
 		ret = PTR_ERR(ccp->hwmon_dev);
 		goto out_hw_close;
