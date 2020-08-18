@@ -10,7 +10,6 @@
 
 #include <linux/bitops.h>
 #include <linux/completion.h>
-#include <linux/delay.h>
 #include <linux/hid.h>
 #include <linux/hwmon.h>
 #include <linux/kernel.h>
@@ -514,7 +513,6 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	init_completion(&ccp->wait_input_report);
 
 	hid_device_io_start(hdev);
-	msleep(50); /* wait before events can be received */
 
 	/* temp and fan connection status only updates when device is powered on */
 	ret = get_temp_cnct(ccp);
