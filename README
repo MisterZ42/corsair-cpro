@@ -22,10 +22,12 @@ in0_label voltage on 12v rail
 in1_label voltage on 5v rail
 in2_label voltage on 3.3v rail
 
-What it cannot do (yet):
+What it cannot do:
 Set internal fan curves depending on temp sensors
-Read fan curves (maybe not possible)
 RGB related things
+
+Issues:
+If the fan configuration is not set to auto on a channel, the driver may not detect a connected fan. Try to use https://github.com/MisterZ42/corsair-cpro-setconf to set the fans to the correct mode.
 
 DISCLAIMER:
 This is not an official Corsair product. There is no warranty. It is licensed under the GPL2.
