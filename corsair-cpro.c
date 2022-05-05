@@ -130,13 +130,17 @@ static int send_usb_cmd(struct ccp_device *ccp, u8 command, u8 byte1, u8 byte2, 
 	reinit_completion(&ccp->wait_input_report);
 
 	ret = hid_hw_output_report(ccp->hdev, ccp->buffer, OUT_BUFFER_SIZE);
-	if (ret < 0)
+	if (ret < 0) {
+		// Resume hidraw in a hacky way...
+		ccp->hdev->claimed |= HID_CLAIMED_HIDRAW;
+		hidraw->exist = true;
+
 		return ret;
+	}
 
 	t = wait_for_completion_timeout(&ccp->wait_input_report, msecs_to_jiffies(REQ_TIMEOUT));
 
-
-	// Resume hidraw i a hacky way...
+	// Resume hidraw in a hacky way...
 	ccp->hdev->claimed |= HID_CLAIMED_HIDRAW;
 	hidraw->exist = true;
 
