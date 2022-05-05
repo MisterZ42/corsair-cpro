@@ -10,7 +10,9 @@
 
 #include <linux/bitops.h>
 #include <linux/completion.h>
+#include <linux/delay.h>
 #include <linux/hid.h>
+#include <linux/hidraw.h>
 #include <linux/hwmon.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -108,6 +110,7 @@ static int ccp_get_errno(struct ccp_device *ccp)
 /* send command, check for error in response, response in ccp->buffer */
 static int send_usb_cmd(struct ccp_device *ccp, u8 command, u8 byte1, u8 byte2, u8 byte3)
 {
+	struct hidraw *hidraw = ccp->hdev->hidraw;
 	unsigned long t;
 	int ret;
 
@@ -117,6 +120,13 @@ static int send_usb_cmd(struct ccp_device *ccp, u8 command, u8 byte1, u8 byte2, 
 	ccp->buffer[2] = byte2;
 	ccp->buffer[3] = byte3;
 
+	// Ugly:
+	// Stop hidraw in a hacky way...
+	hidraw->exist = false;
+	ccp->hdev->claimed &= !HID_CLAIMED_HIDRAW;
+	// Wait for queue to clear
+	msleep(10);
+
 	reinit_completion(&ccp->wait_input_report);
 
 	ret = hid_hw_output_report(ccp->hdev, ccp->buffer, OUT_BUFFER_SIZE);
@@ -124,6 +134,12 @@ static int send_usb_cmd(struct ccp_device *ccp, u8 command, u8 byte1, u8 byte2, 
 		return ret;
 
 	t = wait_for_completion_timeout(&ccp->wait_input_report, msecs_to_jiffies(REQ_TIMEOUT));
+
+
+	// Resume hidraw i a hacky way...
+	ccp->hdev->claimed |= HID_CLAIMED_HIDRAW;
+	hidraw->exist = true;
+
 	if (!t)
 		return -ETIMEDOUT;
 
@@ -140,7 +156,6 @@ static int ccp_raw_event(struct hid_device *hdev, struct hid_report *report, u8 
 
 	memcpy(ccp->buffer, data, min(IN_BUFFER_SIZE, size));
 	complete(&ccp->wait_input_report);
-
 	return 0;
 }
 

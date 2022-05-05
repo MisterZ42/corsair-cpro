@@ -1,33 +1,6 @@
-This is a kernel driver for the Corsair Commander Pro.
+This branch has a hack in it, which tries to solve the problem of races between hidraw and the driver.
+In a hacky way it stops hidraw, waits for the queue to clear and makes the request.
 
-Features:
-Recognize connected fans, read fan speeds.
-Read connected thermal sensors.
-Set and read fan speed with single pwm value.
-Set fan speed with target value.
-Read voltage values.
-
-If you would like to test it, clone the repository.
-make && sudo insmod corsair-cpro.ko
-
-If you run sensors, it should show up.
-
-Features in /sys/class/hwmon/hwmon*
-fan*_label shows the number and the connection status.
-fan*_input shows the fan speed.
-fan*_target sets target RPM values.
-pwm* is takes numbers from 0-255.
-temp*_input shows the temperature.
-in0_label voltage on 12v rail
-in1_label voltage on 5v rail
-in2_label voltage on 3.3v rail
-
-What it cannot do:
-Set internal fan curves depending on temp sensors
-RGB related things
-
-Issues:
-If the fan configuration is not set to auto on a channel, the driver may not detect a connected fan. Try to use https://github.com/MisterZ42/corsair-cpro-setconf to set the fans to the correct mode.
-
-DISCLAIMER:
-This is not an official Corsair product. There is no warranty. It is licensed under the GPL2.
+If you would like to test it, clone the repository. Switch to this branch and "make"
+Load the driver with:
+sudo insmod corsair-cpro.ko
