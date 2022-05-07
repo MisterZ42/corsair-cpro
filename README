@@ -1,6 +1,8 @@
 This branch has a hack in it, which tries to solve the problem of races between hidraw and the driver.
 In a hacky way it stops hidraw, waits for the queue to clear and makes the request.
 
+Please use at your own risk!
+
 If you would like to test it, clone the repository. Switch to this branch and "make"
 Load the driver with:
 sudo insmod corsair-cpro.ko
