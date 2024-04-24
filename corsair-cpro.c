@@ -11,6 +11,7 @@
 #include <linux/bitops.h>
 #include <linux/completion.h>
 #include <linux/hid.h>
+#include <linux/hidraw.h>
 #include <linux/hwmon.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -108,6 +109,7 @@ static int ccp_get_errno(struct ccp_device *ccp)
 /* send command, check for error in response, response in ccp->buffer */
 static int send_usb_cmd(struct ccp_device *ccp, u8 command, u8 byte1, u8 byte2, u8 byte3)
 {
+	struct hidraw *hidraw = ccp->hdev->hidraw;
 	unsigned long t;
 	int ret;
 
@@ -118,6 +120,11 @@ static int send_usb_cmd(struct ccp_device *ccp, u8 command, u8 byte1, u8 byte2, 
 	ccp->buffer[3] = byte3;
 
 	reinit_completion(&ccp->wait_input_report);
+	
+	if(!list_empty(&hidraw->list)) {
+		hid_dbg(ccp->hdev, "pending output report by hidraw");
+		return -ENODATA;
+	}
 
 	ret = hid_hw_output_report(ccp->hdev, ccp->buffer, OUT_BUFFER_SIZE);
 	if (ret < 0)
@@ -133,11 +140,11 @@ static int send_usb_cmd(struct ccp_device *ccp, u8 command, u8 byte1, u8 byte2, 
 static int ccp_raw_event(struct hid_device *hdev, struct hid_report *report, u8 *data, int size)
 {
 	struct ccp_device *ccp = hid_get_drvdata(hdev);
-
+	
 	/* only copy buffer when requested */
 	if (completion_done(&ccp->wait_input_report))
 		return 0;
-
+	
 	memcpy(ccp->buffer, data, min(IN_BUFFER_SIZE, size));
 	complete(&ccp->wait_input_report);
 
