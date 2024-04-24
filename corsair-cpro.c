@@ -122,7 +122,7 @@ static int send_usb_cmd(struct ccp_device *ccp, u8 command, u8 byte1, u8 byte2, 
 	reinit_completion(&ccp->wait_input_report);
 	
 	if(!list_empty(&hidraw->list)) {
-		hid_dbg(ccp->hdev, "pending output report by hidraw");
+		hid_dbg(ccp->hdev, "open hidraw device");
 		return -ENODATA;
 	}
 
