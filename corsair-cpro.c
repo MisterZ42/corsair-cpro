@@ -601,13 +601,9 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	if (ret)
 		return ret;
 
-	ret = hid_hw_start(hdev, HID_CONNECT_HIDRAW);
+	ret = devm_hid_hw_start_and_open(hdev, HID_CONNECT_HIDRAW);
 	if (ret)
 		return ret;
-
-	ret = hid_hw_open(hdev);
-	if (ret)
-		goto out_hw_stop;
 
 	ccp->hdev = hdev;
 	hid_set_drvdata(hdev, ccp);
@@ -621,28 +617,20 @@ static int ccp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	/* temp and fan connection status only updates when device is powered on */
 	ret = get_temp_cnct(ccp);
 	if (ret)
-		goto out_hw_close;
+		return ret;
 
 	ret = get_fan_cnct(ccp);
 	if (ret)
-		goto out_hw_close;
+		return ret;
 
 	ccp_debugfs_init(ccp);
 
 	ccp->hwmon_dev = hwmon_device_register_with_info(&hdev->dev, "corsaircpro",
 							 ccp, &ccp_chip_info, NULL);
-	if (IS_ERR(ccp->hwmon_dev)) {
-		ret = PTR_ERR(ccp->hwmon_dev);
-		goto out_hw_close;
-	}
+	if (IS_ERR(ccp->hwmon_dev))
+		return PTR_ERR(ccp->hwmon_dev);
 
 	return 0;
-
-out_hw_close:
-	hid_hw_close(hdev);
-out_hw_stop:
-	hid_hw_stop(hdev);
-	return ret;
 }
 
 static void ccp_remove(struct hid_device *hdev)
@@ -651,8 +639,6 @@ static void ccp_remove(struct hid_device *hdev)
 
 	debugfs_remove_recursive(ccp->debugfs);
 	hwmon_device_unregister(ccp->hwmon_dev);
-	hid_hw_close(hdev);
-	hid_hw_stop(hdev);
 }
 
 static const struct hid_device_id ccp_devices[] = {
