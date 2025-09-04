@@ -27,7 +27,7 @@
 
 #define OUT_BUFFER_SIZE		63
 #define IN_BUFFER_SIZE		16
-#define LABEL_LENGTH		11
+
 #define REQ_TIMEOUT		300
 
 #define CTL_GET_FW_VER		0x02	/* returns the firmware version in bytes 1-3 */
@@ -78,6 +78,9 @@
 
 #define NUM_FANS		6
 #define NUM_TEMP_SENSORS	4
+#define LABEL_LENGTH		11
+#define FIRMWARE_VER_LENGTH	3
+#define BOOTLOADER_VER_LENGTH	2
 
 struct ccp_device {
 	struct hid_device *hdev;
@@ -90,12 +93,12 @@ struct ccp_device {
 	u8 *cmd_buffer;
 	u8 *buffer;
 	int buffer_recv_size; /* number of received bytes in buffer */
-	int target[6];
+	int target[NUM_FANS];
 	DECLARE_BITMAP(temp_cnct, NUM_TEMP_SENSORS);
 	DECLARE_BITMAP(fan_cnct, NUM_FANS);
-	char fan_label[6][LABEL_LENGTH];
-	u8 firmware_ver[3];
-	u8 bootloader_ver[2];
+	char fan_label[NUM_FANS][LABEL_LENGTH];
+	u8 firmware_ver[FIRMWARE_VER_LENGTH];
+	u8 bootloader_ver[BOOTLOADER_VER_LENGTH];
 };
 
 /* converts response error in buffer to errno */
@@ -518,9 +521,7 @@ static int get_fw_version(struct ccp_device *ccp)
 		hid_notice(ccp->hdev, "Failed to read firmware version.\n");
 		return ret;
 	}
-	ccp->firmware_ver[0] = ccp->buffer[1];
-	ccp->firmware_ver[1] = ccp->buffer[2];
-	ccp->firmware_ver[2] = ccp->buffer[3];
+	memcpy(ccp->firmware_ver, &ccp->buffer[1], FIRMWARE_VER_LENGTH);
 
 	return 0;
 }
@@ -535,8 +536,7 @@ static int get_bl_version(struct ccp_device *ccp)
 		hid_notice(ccp->hdev, "Failed to read bootloader version.\n");
 		return ret;
 	}
-	ccp->bootloader_ver[0] = ccp->buffer[1];
-	ccp->bootloader_ver[1] = ccp->buffer[2];
+	memcpy(ccp->bootloader_ver, &ccp->buffer[1], BOOTLOADER_VER_LENGTH);
 
 	return 0;
 }
@@ -568,10 +568,17 @@ DEFINE_SHOW_ATTRIBUTE(bootloader);
 
 static void ccp_debugfs_init(struct ccp_device *ccp)
 {
-	char name[32];
+	char *name;
+	size_t name_len;
+	char *prefix = "corsaircpro-";
 	int ret;
 
-	scnprintf(name, sizeof(name), "corsaircpro-%s", dev_name(&ccp->hdev->dev));
+	name_len = strlen(prefix) + strlen(dev_name(&ccp->hdev->dev)) + 1;
+	name = kzalloc(name_len, GFP_KERNEL);
+	if (!name)
+		return;
+
+	scnprintf(name, name_len, "%s%s", prefix, dev_name(&ccp->hdev->dev));
 	ccp->debugfs = debugfs_create_dir(name, NULL);
 
 	ret = get_fw_version(ccp);
